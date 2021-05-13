@@ -209,28 +209,44 @@ class InputWriter_Common(object):
         else:
             for HtFracti, TMassDeni, TwFAStifi, TwSSStifi in zip(HtFract, TMassDen, TwFAStif, TwSSStif):
                 f.write('{: 2.15e} {: 2.15e} {: 2.15e} {: 2.15e}\n'.format(HtFracti, TMassDeni, TwFAStifi, TwSSStifi))
+
+        # Correct numerical errors where coefficients don't sum up to exactly 1. Add a delta to the x^6 term to fix the error
+        TwFAM1Sh = np.round(self.fst_vt['ElastoDynTower']['TwFAM1Sh'], 6)
+        TwFAM2Sh = np.round(self.fst_vt['ElastoDynTower']['TwFAM2Sh'], 6)
+        TwSSM1Sh = np.round(self.fst_vt['ElastoDynTower']['TwSSM1Sh'], 6)
+        TwSSM2Sh = np.round(self.fst_vt['ElastoDynTower']['TwSSM2Sh'], 6)
+
+        if sum(TwFAM1Sh) != 1.:
+            TwFAM1Sh[4] += 1. - sum(TwFAM1Sh)
+        if sum(TwFAM2Sh) != 1.:
+            TwFAM2Sh[4] += 1. - sum(TwFAM2Sh)
+        if sum(TwSSM1Sh) != 1.:
+            TwSSM1Sh[4] += 1. - sum(TwSSM1Sh)
+        if sum(TwSSM2Sh) != 1.:
+            TwSSM2Sh[4] += 1. - sum(TwSSM2Sh)
+
         f.write('---------------------- TOWER FORE-AFT MODE SHAPES ------------------------------\n')
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM1Sh'][0], 'TwFAM1Sh(2)', '- Mode 1, coefficient of x^2 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM1Sh'][1], 'TwFAM1Sh(3)', '-       , coefficient of x^3 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM1Sh'][2], 'TwFAM1Sh(4)', '-       , coefficient of x^4 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM1Sh'][3], 'TwFAM1Sh(5)', '-       , coefficient of x^5 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM1Sh'][4], 'TwFAM1Sh(6)', '-       , coefficient of x^6 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM2Sh'][0], 'TwFAM2Sh(2)', '- Mode 2, coefficient of x^2 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM2Sh'][1], 'TwFAM2Sh(3)', '-       , coefficient of x^3 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM2Sh'][2], 'TwFAM2Sh(4)', '-       , coefficient of x^4 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM2Sh'][3], 'TwFAM2Sh(5)', '-       , coefficient of x^5 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwFAM2Sh'][4], 'TwFAM2Sh(6)', '-       , coefficient of x^6 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM1Sh[0], 'TwFAM1Sh(2)', '- Mode 1, coefficient of x^2 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM1Sh[1], 'TwFAM1Sh(3)', '-       , coefficient of x^3 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM1Sh[2], 'TwFAM1Sh(4)', '-       , coefficient of x^4 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM1Sh[3], 'TwFAM1Sh(5)', '-       , coefficient of x^5 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM1Sh[4], 'TwFAM1Sh(6)', '-       , coefficient of x^6 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM2Sh[0], 'TwFAM2Sh(2)', '- Mode 2, coefficient of x^2 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM2Sh[1], 'TwFAM2Sh(3)', '-       , coefficient of x^3 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM2Sh[2], 'TwFAM2Sh(4)', '-       , coefficient of x^4 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM2Sh[3], 'TwFAM2Sh(5)', '-       , coefficient of x^5 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwFAM2Sh[4], 'TwFAM2Sh(6)', '-       , coefficient of x^6 term\n'))
         f.write('---------------------- TOWER SIDE-TO-SIDE MODE SHAPES --------------------------\n')
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM1Sh'][0], 'TwSSM1Sh(2)', '- Mode 1, coefficient of x^2 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM1Sh'][1], 'TwSSM1Sh(3)', '-       , coefficient of x^3 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM1Sh'][2], 'TwSSM1Sh(4)', '-       , coefficient of x^4 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM1Sh'][3], 'TwSSM1Sh(5)', '-       , coefficient of x^5 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM1Sh'][4], 'TwSSM1Sh(6)', '-       , coefficient of x^6 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM2Sh'][0], 'TwSSM2Sh(2)', '- Mode 2, coefficient of x^2 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM2Sh'][1], 'TwSSM2Sh(3)', '-       , coefficient of x^3 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM2Sh'][2], 'TwSSM2Sh(4)', '-       , coefficient of x^4 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM2Sh'][3], 'TwSSM2Sh(5)', '-       , coefficient of x^5 term\n'))
-        f.write('{:<22} {:<11} {:}'.format(self.fst_vt['ElastoDynTower']['TwSSM2Sh'][4], 'TwSSM2Sh(6)', '-       , coefficient of x^6 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM1Sh[0], 'TwSSM1Sh(2)', '- Mode 1, coefficient of x^2 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM1Sh[1], 'TwSSM1Sh(3)', '-       , coefficient of x^3 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM1Sh[2], 'TwSSM1Sh(4)', '-       , coefficient of x^4 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM1Sh[3], 'TwSSM1Sh(5)', '-       , coefficient of x^5 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM1Sh[4], 'TwSSM1Sh(6)', '-       , coefficient of x^6 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM2Sh[0], 'TwSSM2Sh(2)', '- Mode 2, coefficient of x^2 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM2Sh[1], 'TwSSM2Sh(3)', '-       , coefficient of x^3 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM2Sh[2], 'TwSSM2Sh(4)', '-       , coefficient of x^4 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM2Sh[3], 'TwSSM2Sh(5)', '-       , coefficient of x^5 term\n'))
+        f.write('{:<22.6f} {:<11} {:}'.format(TwSSM2Sh[4], 'TwSSM2Sh(6)', '-       , coefficient of x^6 term\n'))
         
         f.close()
 
