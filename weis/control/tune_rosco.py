@@ -41,6 +41,9 @@ class TuneROSCO(ExplicitComponent):
         rotorse_init_options = self.modeling_options['WISDEM']['RotorSE']
         n_pc     = rotorse_init_options['n_pc']
 
+        # Initialize DISCON_in var tree
+        self.modeling_options['openfast']['fst_vt']['DISCON_in'] = {}
+
         # Input parameters
         self.controller_params = {}
         # Controller Flags
@@ -351,8 +354,7 @@ class TuneROSCO(ExplicitComponent):
         self.ROSCO_input['Ct'] = WISDEM_turbine.Ct
         self.ROSCO_input['Cq'] = WISDEM_turbine.Cq
 
-        if self.modeling_options['Level3']['flag']:
-            self.modeling_options['openfast']['fst_vt']['DISCON_in'] = self.ROSCO_input  
+        self.modeling_options['openfast']['fst_vt']['DISCON_in'] = self.ROSCO_input  
         
 
         # Outputs 
