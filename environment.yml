@@ -9,25 +9,31 @@ dependencies:
   - cython
   - dill
   - git
+  - Jinja2
   - jsonschema
   - make
+  - pip
   - matplotlib-base
   - nlopt
   - numpy
   - openmdao
   - openpyxl
   - pandas
+  - pip
   - pyside2
   - pytest
   - pytest-cov
   - python
+  - python-benedict
   - pyyaml
   - ruamel_yaml
   - scipy
+  - seaborn
   - setuptools
   - smt
   - sortedcontainers
   - swig
+#  - versioneer
   - pip:
     - fatpack
     - jsonmerge

@@ -26,7 +26,7 @@ def run_wisdem(fname_wt_input, fname_modeling_options, fname_opt_options, overri
 
     # Initialize openmdao problem. If running with multiple processors in MPI, use parallel finite differencing equal to the number of cores used.
     # Otherwise, initialize the WindPark system normally. Get the rank number for parallelization. We only print output files using the root processor.
-    myopt = PoseOptimization(modeling_options, opt_options)
+    myopt = PoseOptimization(wt_init, modeling_options, opt_options)
 
     if MPI:
 
@@ -53,7 +53,7 @@ def run_wisdem(fname_wt_input, fname_modeling_options, fname_opt_options, overri
 
     folder_output = opt_options["general"]["folder_output"]
     if rank == 0 and not os.path.isdir(folder_output):
-        os.mkdir(folder_output)
+        os.makedirs(folder_output)
 
     if color_i == 0:  # the top layer of cores enters
         if MPI:
@@ -105,8 +105,32 @@ def run_wisdem(fname_wt_input, fname_modeling_options, fname_opt_options, overri
                 checks = wt_opt.check_partials(compact_print=True)
 
         sys.stdout.flush()
+
+        if opt_options["driver"]["step_size_study"]["flag"]:
+            wt_opt.run_model()
+            study_options = opt_options["driver"]["step_size_study"]
+            step_sizes = study_options["step_sizes"]
+            all_derivs = {}
+            for idx, step_size in enumerate(step_sizes):
+                wt_opt.model.approx_totals(method="fd", step=step_size, form=study_options["form"])
+
+                if study_options["of"]:
+                    of = study_options["of"]
+                else:
+                    of = None
+
+                if study_options["wrt"]:
+                    wrt = study_options["wrt"]
+                else:
+                    wrt = None
+
+                derivs = wt_opt.compute_totals(of=of, wrt=wrt, driver_scaling=study_options["driver_scaling"])
+                all_derivs[idx] = derivs
+                all_derivs[idx]["step_size"] = step_size
+            np.save("total_derivs.npy", all_derivs)
+
         # Run openmdao problem
-        if opt_options["opt_flag"]:
+        elif opt_options["opt_flag"]:
             wt_opt.run_driver()
         else:
             wt_opt.run_model()

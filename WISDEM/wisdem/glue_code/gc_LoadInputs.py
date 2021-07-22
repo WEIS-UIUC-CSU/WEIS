@@ -229,6 +229,11 @@ class WindTurbineOntologyPython(object):
             self.modeling_options["WISDEM"]["TowerSE"]["n_layers_tower"] = len(
                 self.wt_init["components"]["tower"]["internal_structure_2d_fem"]["layers"]
             )
+            self.modeling_options["WISDEM"]["TowerSE"]["n_height"] = self.modeling_options["WISDEM"]["TowerSE"][
+                "n_height_tower"
+            ]
+            self.modeling_options["WISDEM"]["TowerSE"]["n_height_monopile"] = 0
+            self.modeling_options["WISDEM"]["TowerSE"]["n_layers_monopile"] = 0
 
         # Monopile
         if self.modeling_options["flags"]["monopile"]:
@@ -237,6 +242,9 @@ class WindTurbineOntologyPython(object):
             )
             self.modeling_options["WISDEM"]["TowerSE"]["n_layers_monopile"] = len(
                 self.wt_init["components"]["monopile"]["internal_structure_2d_fem"]["layers"]
+            )
+            self.modeling_options["WISDEM"]["TowerSE"]["n_height"] += (
+                self.modeling_options["WISDEM"]["TowerSE"]["n_height_monopile"] - 1
             )
 
         # Floating platform
@@ -491,6 +499,8 @@ class WindTurbineOntologyPython(object):
             self.modeling_options["mooring"]["node1"] = [""] * n_lines
             self.modeling_options["mooring"]["node2"] = [""] * n_lines
             self.modeling_options["mooring"]["line_type"] = [""] * n_lines
+            self.modeling_options["mooring"]["line_material"] = [""] * n_lines
+            self.modeling_options["mooring"]["line_anchor"] = [""] * n_lines
             fairlead_nodes = []
             for i in range(n_lines):
                 self.modeling_options["mooring"]["node1"][i] = self.wt_init["components"]["mooring"]["lines"][i][
@@ -513,17 +523,50 @@ class WindTurbineOntologyPython(object):
                     fairlead_nodes.append(self.wt_init["components"]["mooring"]["nodes"][node1id]["joint"])
                 if self.modeling_options["mooring"]["node_type"][node2id] == "vessel":
                     fairlead_nodes.append(self.wt_init["components"]["mooring"]["nodes"][node2id]["joint"])
+                # Store the anchor type names to start
+                if "fix" in self.modeling_options["mooring"]["node_type"][node1id]:
+                    self.modeling_options["mooring"]["line_anchor"][i] = self.modeling_options["mooring"][
+                        "anchor_type"
+                    ][node1id]
+                if "fix" in self.modeling_options["mooring"]["node_type"][node2id]:
+                    self.modeling_options["mooring"]["line_anchor"][i] = self.modeling_options["mooring"][
+                        "anchor_type"
+                    ][node2id]
 
             self.modeling_options["mooring"]["line_type_name"] = [""] * n_line_types
+            self.modeling_options["mooring"]["line_type_type"] = [""] * n_line_types
             for i in range(n_line_types):
                 self.modeling_options["mooring"]["line_type_name"][i] = self.wt_init["components"]["mooring"][
                     "line_types"
                 ][i]["name"]
+                self.modeling_options["mooring"]["line_type_type"][i] = self.wt_init["components"]["mooring"][
+                    "line_types"
+                ][i]["type"].lower()
+                for j in range(n_lines):
+                    if (
+                        self.modeling_options["mooring"]["line_type"][j]
+                        == self.modeling_options["mooring"]["line_type_name"][i]
+                    ):
+                        self.modeling_options["mooring"]["line_material"][j] = self.modeling_options["mooring"][
+                            "line_type_type"
+                        ][i]
             self.modeling_options["mooring"]["anchor_type_name"] = [""] * n_anchor_types
+            self.modeling_options["mooring"]["anchor_type_type"] = [""] * n_anchor_types
             for i in range(n_anchor_types):
                 self.modeling_options["mooring"]["anchor_type_name"][i] = self.wt_init["components"]["mooring"][
                     "anchor_types"
                 ][i]["name"]
+                self.modeling_options["mooring"]["anchor_type_type"][i] = self.wt_init["components"]["mooring"][
+                    "anchor_types"
+                ][i]["type"].lower()
+                for j in range(n_lines):
+                    if (
+                        self.modeling_options["mooring"]["line_anchor"][j]
+                        == self.modeling_options["mooring"]["anchor_type_name"][i]
+                    ):
+                        self.modeling_options["mooring"]["line_anchor"][j] = self.modeling_options["mooring"][
+                            "anchor_type_type"
+                        ][i]
             self.modeling_options["mooring"]["n_attach"] = len(set(fairlead_nodes))
 
         # Assembly
@@ -560,6 +603,16 @@ class WindTurbineOntologyPython(object):
             blade_opt_options["aero_shape"]["chord"]["n_opt"] = self.modeling_options["WISDEM"]["RotorSE"]["n_span"]
         elif blade_opt_options["aero_shape"]["chord"]["n_opt"] < 4:
             raise ValueError("Cannot optimize chord with less than 4 control points along blade span")
+
+        if not blade_opt_options["aero_shape"]["t/c"]["flag"]:
+            blade_opt_options["aero_shape"]["t/c"]["n_opt"] = self.modeling_options["WISDEM"]["RotorSE"]["n_span"]
+        elif blade_opt_options["aero_shape"]["t/c"]["n_opt"] < 4:
+            raise ValueError("Cannot optimize t/c with less than 4 control points along blade span")
+
+        if not blade_opt_options["aero_shape"]["L/D"]["flag"]:
+            blade_opt_options["aero_shape"]["L/D"]["n_opt"] = self.modeling_options["WISDEM"]["RotorSE"]["n_span"]
+        elif blade_opt_options["aero_shape"]["L/D"]["n_opt"] < 4:
+            raise ValueError("Cannot optimize L/D with less than 4 control points along blade span")
 
         if not blade_opt_options["structure"]["spar_cap_ss"]["flag"]:
             blade_opt_options["structure"]["spar_cap_ss"]["n_opt"] = self.modeling_options["WISDEM"]["RotorSE"][
@@ -653,6 +706,19 @@ class WindTurbineOntologyPython(object):
             self.wt_init["components"]["blade"]["outer_shape_bem"]["pitch_axis"]["values"] = wt_opt[
                 "blade.outer_shape_bem.pitch_axis"
             ].tolist()
+            if self.modeling_options["WISDEM"]["RotorSE"]["inn_af"]:
+                self.wt_init["components"]["blade"]["outer_shape_bem"]["t/c"]["grid"] = wt_opt[
+                    "blade.outer_shape_bem.s"
+                ].tolist()
+                self.wt_init["components"]["blade"]["outer_shape_bem"]["t/c"]["values"] = wt_opt[
+                    "blade.interp_airfoils.r_thick_interp"
+                ].tolist()
+                self.wt_init["components"]["blade"]["outer_shape_bem"]["L/D"]["grid"] = wt_opt[
+                    "blade.outer_shape_bem.s"
+                ].tolist()
+                self.wt_init["components"]["blade"]["outer_shape_bem"]["L/D"]["values"] = wt_opt[
+                    "rp.powercurve.L_D"
+                ].tolist()
             self.wt_init["components"]["blade"]["outer_shape_bem"]["reference_axis"]["x"]["grid"] = wt_opt[
                 "blade.outer_shape_bem.s"
             ].tolist()
@@ -804,10 +870,10 @@ class WindTurbineOntologyPython(object):
             K = []
             for i in range(self.modeling_options["WISDEM"]["RotorSE"]["n_span"]):
                 Ki = np.zeros(21)
-                Ki[11] = wt_opt["re.EA"][i]
-                Ki[15] = wt_opt["re.EIxx"][i]
-                Ki[18] = wt_opt["re.EIyy"][i]
-                Ki[20] = wt_opt["re.GJ"][i]
+                Ki[11] = wt_opt["rotorse.EA"][i]
+                Ki[15] = wt_opt["rotorse.EIxx"][i]
+                Ki[18] = wt_opt["rotorse.EIyy"][i]
+                Ki[20] = wt_opt["rotorse.GJ"][i]
                 K.append(Ki.tolist())
             self.wt_init["components"]["blade"]["elastic_properties_mb"]["six_x_six"]["stiff_matrix"]["values"] = K
             self.wt_init["components"]["blade"]["elastic_properties_mb"]["six_x_six"]["inertia_matrix"] = {}
@@ -817,17 +883,17 @@ class WindTurbineOntologyPython(object):
             I = []
             for i in range(self.modeling_options["WISDEM"]["RotorSE"]["n_span"]):
                 Ii = np.zeros(21)
-                Ii[0] = wt_opt["re.rhoA"][i]
-                Ii[5] = -wt_opt["re.rhoA"][i] * wt_opt["re.y_cg"][i]
-                Ii[6] = wt_opt["re.rhoA"][i]
-                Ii[10] = wt_opt["re.rhoA"][i] * wt_opt["re.x_cg"][i]
-                Ii[11] = wt_opt["re.rhoA"][i]
-                Ii[12] = wt_opt["re.rhoA"][i] * wt_opt["re.y_cg"][i]
-                Ii[13] = -wt_opt["re.rhoA"][i] * wt_opt["re.x_cg"][i]
-                Ii[15] = wt_opt["re.precomp.edge_iner"][i]
-                Ii[16] = wt_opt["re.precomp.edge_iner"][i]
+                Ii[0] = wt_opt["rotorse.rhoA"][i]
+                Ii[5] = -wt_opt["rotorse.rhoA"][i] * wt_opt["rotorse.re.y_cg"][i]
+                Ii[6] = wt_opt["rotorse.rhoA"][i]
+                Ii[10] = wt_opt["rotorse.rhoA"][i] * wt_opt["rotorse.re.x_cg"][i]
+                Ii[11] = wt_opt["rotorse.rhoA"][i]
+                Ii[12] = wt_opt["rotorse.rhoA"][i] * wt_opt["rotorse.re.y_cg"][i]
+                Ii[13] = -wt_opt["rotorse.rhoA"][i] * wt_opt["rotorse.re.x_cg"][i]
+                Ii[15] = wt_opt["rotorse.re.precomp.edge_iner"][i]
+                Ii[16] = wt_opt["rotorse.re.precomp.edge_iner"][i]
                 # Ii[18] = wt_opt['re.precomp.edge_iner'][i]
-                Ii[20] = wt_opt["re.rhoJ"][i]
+                Ii[20] = wt_opt["rotorse.rhoJ"][i]
                 I.append(Ii.tolist())
             self.wt_init["components"]["blade"]["elastic_properties_mb"]["six_x_six"]["inertia_matrix"]["values"] = I
 

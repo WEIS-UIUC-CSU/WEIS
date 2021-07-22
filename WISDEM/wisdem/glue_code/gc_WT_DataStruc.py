@@ -2,6 +2,7 @@ import copy
 
 import numpy as np
 import openmdao.api as om
+import wisdem.moorpy.MoorProps as mp
 from scipy.interpolate import PchipInterpolator, interp1d
 from wisdem.commonse.utilities import arc_length, arc_length_deriv
 from wisdem.rotorse.parametrize_rotor import ParametrizeBladeAero, ParametrizeBladeStruct
@@ -75,6 +76,45 @@ class WindTurbineOntologyOpenMDAO(om.Group):
             )
             self.add_subsystem("airfoils", airfoils)
 
+            if modeling_options["WISDEM"]["RotorSE"]["inn_af"]:
+                inn_af = om.IndepVarComp()
+                inn_af.add_output(
+                    "s_opt_r_thick", val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["t/c"]["n_opt"])
+                )
+                inn_af.add_output(
+                    "r_thick_opt",
+                    val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["t/c"]["n_opt"]),
+                )
+                inn_af.add_output(
+                    "s_opt_L_D", val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["L/D"]["n_opt"])
+                )
+                inn_af.add_output(
+                    "L_D_opt",
+                    val=np.ones(opt_options["design_variables"]["blade"]["aero_shape"]["L/D"]["n_opt"]),
+                )
+                self.add_subsystem("inn_af", inn_af)
+
+        # Hub inputs
+        if modeling_options["flags"]["hub"] or modeling_options["flags"]["blade"]:
+            self.add_subsystem("hub", Hub(flags=modeling_options["flags"]))
+
+        # Control inputs
+        if modeling_options["flags"]["control"]:
+            ctrl_ivc = self.add_subsystem("control", om.IndepVarComp())
+            ctrl_ivc.add_output(
+                "V_in", val=0.0, units="m/s", desc="Cut in wind speed. This is the wind speed where region II begins."
+            )
+            ctrl_ivc.add_output(
+                "V_out", val=0.0, units="m/s", desc="Cut out wind speed. This is the wind speed where region III ends."
+            )
+            ctrl_ivc.add_output("minOmega", val=0.0, units="rad/s", desc="Minimum allowed rotor speed.")
+            ctrl_ivc.add_output("maxOmega", val=0.0, units="rad/s", desc="Maximum allowed rotor speed.")
+            ctrl_ivc.add_output("max_TS", val=0.0, units="m/s", desc="Maximum allowed blade tip speed.")
+            ctrl_ivc.add_output("max_pitch_rate", val=0.0, units="rad/s", desc="Maximum allowed blade pitch rate")
+            ctrl_ivc.add_output("max_torque_rate", val=0.0, units="N*m/s", desc="Maximum allowed generator torque rate")
+            ctrl_ivc.add_output("rated_TSR", val=0.0, desc="Constant tip speed ratio in region II.")
+            ctrl_ivc.add_output("rated_pitch", val=0.0, units="rad", desc="Constant pitch angle in region II.")
+
         # Blade inputs and connections from airfoils
         if modeling_options["flags"]["blade"]:
             self.add_subsystem(
@@ -93,12 +133,17 @@ class WindTurbineOntologyOpenMDAO(om.Group):
             self.connect("airfoils.cd", "blade.interp_airfoils.cd")
             self.connect("airfoils.cm", "blade.interp_airfoils.cm")
 
-        # Hub inputs
-        if modeling_options["flags"]["hub"]:
-            self.add_subsystem("hub", Hub())
+            if modeling_options["WISDEM"]["RotorSE"]["inn_af"]:
+
+                self.connect("airfoils.aoa", "blade.run_inn_af.aoa")
+                self.connect("inn_af.s_opt_r_thick", "blade.run_inn_af.s_opt_r_thick")
+                self.connect("inn_af.s_opt_L_D", "blade.run_inn_af.s_opt_L_D")
+                self.connect("inn_af.r_thick_opt", "blade.run_inn_af.r_thick_opt")
+                self.connect("inn_af.L_D_opt", "blade.run_inn_af.L_D_opt")
+                self.connect("control.rated_TSR", "blade.run_inn_af.rated_TSR")
 
         # Nacelle inputs
-        if modeling_options["flags"]["nacelle"]:
+        if modeling_options["flags"]["nacelle"] or modeling_options["flags"]["blade"]:
             nacelle_ivc = om.IndepVarComp()
             # Common direct and geared
             nacelle_ivc.add_output(
@@ -111,99 +156,116 @@ class WindTurbineOntologyOpenMDAO(om.Group):
                 "overhang", val=0.0, units="m", desc="Horizontal distance from tower top edge to hub flange"
             )
             nacelle_ivc.add_output(
-                "distance_hub2mb", val=0.0, units="m", desc="Distance from hub flange to first main bearing along shaft"
-            )
-            nacelle_ivc.add_output(
-                "distance_mb2mb", val=0.0, units="m", desc="Distance from first to second main bearing along shaft"
-            )
-            nacelle_ivc.add_output("L_generator", val=0.0, units="m", desc="Generator length along shaft")
-            nacelle_ivc.add_output("lss_diameter", val=np.zeros(2), units="m", desc="Diameter of low speed shaft")
-            nacelle_ivc.add_output(
-                "lss_wall_thickness", val=np.zeros(2), units="m", desc="Thickness of low speed shaft"
-            )
-            nacelle_ivc.add_output("gear_ratio", val=1.0, desc="Total gear ratio of drivetrain (use 1.0 for direct)")
-            nacelle_ivc.add_output(
                 "gearbox_efficiency", val=1.0, desc="Efficiency of the gearbox. Set to 1.0 for direct-drive"
             )
-            nacelle_ivc.add_output("damping_ratio", val=0.0, desc="Damping ratio for the drivetrain system")
-            nacelle_ivc.add_output(
-                "brake_mass_user",
-                val=0.0,
-                units="kg",
-                desc="Override regular regression-based calculation of brake mass with this value",
-            )
-            nacelle_ivc.add_output(
-                "hvac_mass_coeff",
-                val=0.025,
-                units="kg/kW/m",
-                desc="Regression-based scaling coefficient on machine rating to get HVAC system mass",
-            )
-            nacelle_ivc.add_output(
-                "converter_mass_user",
-                val=0.0,
-                units="kg",
-                desc="Override regular regression-based calculation of converter mass with this value",
-            )
-            nacelle_ivc.add_output(
-                "transformer_mass_user",
-                val=0.0,
-                units="kg",
-                desc="Override regular regression-based calculation of transformer mass with this value",
-            )
-            nacelle_ivc.add_discrete_output("mb1Type", val="CARB", desc="Type of main bearing: CARB / CRB / SRB / TRB")
-            nacelle_ivc.add_discrete_output("mb2Type", val="SRB", desc="Type of main bearing: CARB / CRB / SRB / TRB")
-            nacelle_ivc.add_discrete_output(
-                "uptower", val=True, desc="If power electronics are located uptower (True) or at tower base (False)"
-            )
-            nacelle_ivc.add_discrete_output(
-                "lss_material", val="steel", desc="Material name identifier for the low speed shaft"
-            )
-            nacelle_ivc.add_discrete_output(
-                "hss_material", val="steel", desc="Material name identifier for the high speed shaft"
-            )
-            nacelle_ivc.add_discrete_output(
-                "bedplate_material", val="steel", desc="Material name identifier for the bedplate"
-            )
+            nacelle_ivc.add_output("gear_ratio", val=1.0, desc="Total gear ratio of drivetrain (use 1.0 for direct)")
+            if modeling_options["flags"]["nacelle"]:
+                nacelle_ivc.add_output(
+                    "distance_hub2mb",
+                    val=0.0,
+                    units="m",
+                    desc="Distance from hub flange to first main bearing along shaft",
+                )
+                nacelle_ivc.add_output(
+                    "distance_mb2mb", val=0.0, units="m", desc="Distance from first to second main bearing along shaft"
+                )
+                nacelle_ivc.add_output("L_generator", val=0.0, units="m", desc="Generator length along shaft")
+                nacelle_ivc.add_output("lss_diameter", val=np.zeros(2), units="m", desc="Diameter of low speed shaft")
+                nacelle_ivc.add_output(
+                    "lss_wall_thickness", val=np.zeros(2), units="m", desc="Thickness of low speed shaft"
+                )
+                nacelle_ivc.add_output("damping_ratio", val=0.0, desc="Damping ratio for the drivetrain system")
+                nacelle_ivc.add_output(
+                    "brake_mass_user",
+                    val=0.0,
+                    units="kg",
+                    desc="Override regular regression-based calculation of brake mass with this value",
+                )
+                nacelle_ivc.add_output(
+                    "hvac_mass_coeff",
+                    val=0.025,
+                    units="kg/kW/m",
+                    desc="Regression-based scaling coefficient on machine rating to get HVAC system mass",
+                )
+                nacelle_ivc.add_output(
+                    "converter_mass_user",
+                    val=0.0,
+                    units="kg",
+                    desc="Override regular regression-based calculation of converter mass with this value",
+                )
+                nacelle_ivc.add_output(
+                    "transformer_mass_user",
+                    val=0.0,
+                    units="kg",
+                    desc="Override regular regression-based calculation of transformer mass with this value",
+                )
+                nacelle_ivc.add_discrete_output(
+                    "mb1Type", val="CARB", desc="Type of main bearing: CARB / CRB / SRB / TRB"
+                )
+                nacelle_ivc.add_discrete_output(
+                    "mb2Type", val="SRB", desc="Type of main bearing: CARB / CRB / SRB / TRB"
+                )
+                nacelle_ivc.add_discrete_output(
+                    "uptower", val=True, desc="If power electronics are located uptower (True) or at tower base (False)"
+                )
+                nacelle_ivc.add_discrete_output(
+                    "lss_material", val="steel", desc="Material name identifier for the low speed shaft"
+                )
+                nacelle_ivc.add_discrete_output(
+                    "hss_material", val="steel", desc="Material name identifier for the high speed shaft"
+                )
+                nacelle_ivc.add_discrete_output(
+                    "bedplate_material", val="steel", desc="Material name identifier for the bedplate"
+                )
 
-            if modeling_options["WISDEM"]["DriveSE"]["direct"]:
-                # Direct only
-                nacelle_ivc.add_output(
-                    "nose_diameter", val=np.zeros(2), units="m", desc="Diameter of nose (also called turret or spindle)"
-                )
-                nacelle_ivc.add_output(
-                    "nose_wall_thickness",
-                    val=np.zeros(2),
-                    units="m",
-                    desc="Thickness of nose (also called turret or spindle)",
-                )
-                nacelle_ivc.add_output(
-                    "bedplate_wall_thickness",
-                    val=np.zeros(4),
-                    units="m",
-                    desc="Thickness of hollow elliptical bedplate",
-                )
-            else:
-                # Geared only
-                nacelle_ivc.add_output("hss_length", val=0.0, units="m", desc="Length of high speed shaft")
-                nacelle_ivc.add_output("hss_diameter", val=np.zeros(2), units="m", desc="Diameter of high speed shaft")
-                nacelle_ivc.add_output(
-                    "hss_wall_thickness", val=np.zeros(2), units="m", desc="Wall thickness of high speed shaft"
-                )
-                nacelle_ivc.add_output("bedplate_flange_width", val=0.0, units="m", desc="Bedplate I-beam flange width")
-                nacelle_ivc.add_output(
-                    "bedplate_flange_thickness", val=0.0, units="m", desc="Bedplate I-beam flange thickness"
-                )
-                nacelle_ivc.add_output(
-                    "bedplate_web_thickness", val=0.0, units="m", desc="Bedplate I-beam web thickness"
-                )
-                nacelle_ivc.add_discrete_output(
-                    "gear_configuration",
-                    val="eep",
-                    desc="3-letter string of Es or Ps to denote epicyclic or parallel gear configuration",
-                )
-                nacelle_ivc.add_discrete_output(
-                    "planet_numbers", val=[3, 3, 0], desc="Number of planets for epicyclic stages (use 0 for parallel)"
-                )
+                if modeling_options["WISDEM"]["DriveSE"]["direct"]:
+                    # Direct only
+                    nacelle_ivc.add_output(
+                        "nose_diameter",
+                        val=np.zeros(2),
+                        units="m",
+                        desc="Diameter of nose (also called turret or spindle)",
+                    )
+                    nacelle_ivc.add_output(
+                        "nose_wall_thickness",
+                        val=np.zeros(2),
+                        units="m",
+                        desc="Thickness of nose (also called turret or spindle)",
+                    )
+                    nacelle_ivc.add_output(
+                        "bedplate_wall_thickness",
+                        val=np.zeros(4),
+                        units="m",
+                        desc="Thickness of hollow elliptical bedplate",
+                    )
+                else:
+                    # Geared only
+                    nacelle_ivc.add_output("hss_length", val=0.0, units="m", desc="Length of high speed shaft")
+                    nacelle_ivc.add_output(
+                        "hss_diameter", val=np.zeros(2), units="m", desc="Diameter of high speed shaft"
+                    )
+                    nacelle_ivc.add_output(
+                        "hss_wall_thickness", val=np.zeros(2), units="m", desc="Wall thickness of high speed shaft"
+                    )
+                    nacelle_ivc.add_output(
+                        "bedplate_flange_width", val=0.0, units="m", desc="Bedplate I-beam flange width"
+                    )
+                    nacelle_ivc.add_output(
+                        "bedplate_flange_thickness", val=0.0, units="m", desc="Bedplate I-beam flange thickness"
+                    )
+                    nacelle_ivc.add_output(
+                        "bedplate_web_thickness", val=0.0, units="m", desc="Bedplate I-beam web thickness"
+                    )
+                    nacelle_ivc.add_discrete_output(
+                        "gear_configuration",
+                        val="eep",
+                        desc="3-letter string of Es or Ps to denote epicyclic or parallel gear configuration",
+                    )
+                    nacelle_ivc.add_discrete_output(
+                        "planet_numbers",
+                        val=[3, 3, 0],
+                        desc="Number of planets for epicyclic stages (use 0 for parallel)",
+                    )
 
             # Mulit-body properties
             # GB: I understand these will need to be in there for OpenFAST, but if running DrivetrainSE & OpenFAST this might cause problems?
@@ -359,23 +421,6 @@ class WindTurbineOntologyOpenMDAO(om.Group):
             self.add_subsystem("floating", Floating(floating_init_options=modeling_options["floating"]))
             self.add_subsystem("mooring", Mooring(options=modeling_options))
             self.connect("floating.joints_xyz", "mooring.joints_xyz")
-
-        # Control inputs
-        if modeling_options["flags"]["control"]:
-            ctrl_ivc = self.add_subsystem("control", om.IndepVarComp())
-            ctrl_ivc.add_output(
-                "V_in", val=0.0, units="m/s", desc="Cut in wind speed. This is the wind speed where region II begins."
-            )
-            ctrl_ivc.add_output(
-                "V_out", val=0.0, units="m/s", desc="Cut out wind speed. This is the wind speed where region III ends."
-            )
-            ctrl_ivc.add_output("minOmega", val=0.0, units="rad/s", desc="Minimum allowed rotor speed.")
-            ctrl_ivc.add_output("maxOmega", val=0.0, units="rad/s", desc="Maximum allowed rotor speed.")
-            ctrl_ivc.add_output("max_TS", val=0.0, units="m/s", desc="Maximum allowed blade tip speed.")
-            ctrl_ivc.add_output("max_pitch_rate", val=0.0, units="rad/s", desc="Maximum allowed blade pitch rate")
-            ctrl_ivc.add_output("max_torque_rate", val=0.0, units="N*m/s", desc="Maximum allowed generator torque rate")
-            ctrl_ivc.add_output("rated_TSR", val=0.0, desc="Constant tip speed ratio in region II.")
-            ctrl_ivc.add_output("rated_pitch", val=0.0, units="rad", desc="Constant pitch angle in region II.")
 
         # Wind turbine configuration inputs
         conf_ivc = self.add_subsystem("configuration", om.IndepVarComp())
@@ -538,10 +583,12 @@ class Blade(om.Group):
         )
         opt_var.add_output("af_position", val=np.ones(rotorse_options["n_af_span"]))
         opt_var.add_output(
-            "s_opt_spar_cap_ss", val=np.ones(opt_options["design_variables"]["blade"]["structure"]["spar_cap_ss"]["n_opt"])
+            "s_opt_spar_cap_ss",
+            val=np.ones(opt_options["design_variables"]["blade"]["structure"]["spar_cap_ss"]["n_opt"]),
         )
         opt_var.add_output(
-            "s_opt_spar_cap_ps", val=np.ones(opt_options["design_variables"]["blade"]["structure"]["spar_cap_ps"]["n_opt"])
+            "s_opt_spar_cap_ps",
+            val=np.ones(opt_options["design_variables"]["blade"]["structure"]["spar_cap_ps"]["n_opt"]),
         )
         opt_var.add_output(
             "spar_cap_ss_opt",
@@ -553,6 +600,24 @@ class Blade(om.Group):
             units="m",
             val=np.ones(opt_options["design_variables"]["blade"]["structure"]["spar_cap_ps"]["n_opt"]),
         )
+        opt_var.add_output(
+            "s_opt_te_ss",
+            val=np.ones(opt_options["design_variables"]["blade"]["structure"]["te_ss"]["n_opt"]),
+        )
+        opt_var.add_output(
+            "s_opt_te_ps",
+            val=np.ones(opt_options["design_variables"]["blade"]["structure"]["te_ps"]["n_opt"]),
+        )
+        opt_var.add_output(
+            "te_ss_opt",
+            units="m",
+            val=np.ones(opt_options["design_variables"]["blade"]["structure"]["te_ss"]["n_opt"]),
+        )
+        opt_var.add_output(
+            "te_ps_opt",
+            units="m",
+            val=np.ones(opt_options["design_variables"]["blade"]["structure"]["te_ps"]["n_opt"]),
+        )
         self.add_subsystem("opt_var", opt_var)
 
         # Import outer shape BEM
@@ -562,28 +627,39 @@ class Blade(om.Group):
         self.add_subsystem(
             "pa", ParametrizeBladeAero(rotorse_options=rotorse_options, opt_options=opt_options)
         )  # Parameterize aero (chord and twist)
+        # Connections to blade aero parametrization
+        self.connect("opt_var.s_opt_twist", "pa.s_opt_twist")
+        self.connect("opt_var.s_opt_chord", "pa.s_opt_chord")
+        self.connect("opt_var.twist_opt", "pa.twist_opt")
+        self.connect("opt_var.chord_opt", "pa.chord_opt")
+        self.connect("outer_shape_bem.s", "pa.s")
 
         # Interpolate airfoil profiles and coordinates
         self.add_subsystem(
             "interp_airfoils",
             Blade_Interp_Airfoils(rotorse_options=rotorse_options),
         )
-
-        # Connections to blade aero parametrization
-        self.connect("opt_var.s_opt_twist", "pa.s_opt_twist")
-        self.connect("opt_var.s_opt_chord", "pa.s_opt_chord")
-        self.connect("opt_var.twist_opt", "pa.twist_opt")
-        self.connect("opt_var.chord_opt", "pa.chord_opt")
-
-        self.connect("outer_shape_bem.s", "pa.s")
-        # self.connect("outer_shape_bem.twist", "pa.twist_original")
-        # self.connect("outer_shape_bem.chord", "pa.chord_original")
-
         # Connections from oute_shape_bem to interp_airfoils
         self.connect("outer_shape_bem.s", "interp_airfoils.s")
         self.connect("pa.chord_param", "interp_airfoils.chord")
         self.connect("outer_shape_bem.pitch_axis", "interp_airfoils.pitch_axis")
         self.connect("opt_var.af_position", "interp_airfoils.af_position")
+
+        if rotorse_options["inn_af"]:
+            self.add_subsystem(
+                "run_inn_af",
+                INN_Airfoils(
+                    rotorse_options=rotorse_options,
+                    aero_shape_opt_options=opt_options["design_variables"]["blade"]["aero_shape"],
+                ),
+            )
+            self.connect("outer_shape_bem.s", "run_inn_af.s")
+            self.connect("pa.chord_param", "run_inn_af.chord")
+            self.connect("interp_airfoils.r_thick_interp", "run_inn_af.r_thick_interp_yaml")
+            self.connect("interp_airfoils.cl_interp", "run_inn_af.cl_interp_yaml")
+            self.connect("interp_airfoils.cd_interp", "run_inn_af.cd_interp_yaml")
+            self.connect("interp_airfoils.cm_interp", "run_inn_af.cm_interp_yaml")
+            self.connect("interp_airfoils.coord_xy_interp", "run_inn_af.coord_xy_interp_yaml")
 
         # If the flag is true, generate the 3D x,y,z points of the outer blade shape
         if rotorse_options["lofted_output"] == True:
@@ -616,6 +692,12 @@ class Blade(om.Group):
         self.connect("opt_var.s_opt_spar_cap_ss", "ps.s_opt_spar_cap_ss")
         self.connect("opt_var.spar_cap_ps_opt", "ps.spar_cap_ps_opt")
         self.connect("opt_var.s_opt_spar_cap_ps", "ps.s_opt_spar_cap_ps")
+
+        self.connect("opt_var.te_ss_opt", "ps.te_ss_opt")
+        self.connect("opt_var.s_opt_te_ss", "ps.s_opt_te_ss")
+        self.connect("opt_var.te_ps_opt", "ps.te_ps_opt")
+        self.connect("opt_var.s_opt_te_ps", "ps.s_opt_te_ps")
+
         self.connect("outer_shape_bem.s", "ps.s")
         # self.connect('internal_structure_2d_fem.layer_name',      'ps.layer_name')
         self.connect("internal_structure_2d_fem.layer_thickness", "ps.layer_thickness_original")
@@ -1029,6 +1111,157 @@ class Blade_Interp_Airfoils(om.ExplicitComponent):
         # axat.legend()
         # plt.show()
         # print(np.flip(s_interp_rt))
+
+
+class INN_Airfoils(om.ExplicitComponent):
+    # Openmdao component to run the inverted neural network framework for airfoil design
+    def initialize(self):
+        self.options.declare("rotorse_options")
+        self.options.declare("aero_shape_opt_options")
+
+    def setup(self):
+        rotorse_options = self.options["rotorse_options"]
+        aero_shape_opt_options = self.options["aero_shape_opt_options"]
+        self.n_span = n_span = rotorse_options["n_span"]
+        self.n_aoa = n_aoa = rotorse_options["n_aoa"]  # Number of angle of attacks
+        self.n_Re = n_Re = rotorse_options["n_Re"]  # Number of Reynolds, so far hard set at 1
+        self.n_tab = n_tab = rotorse_options[
+            "n_tab"
+        ]  # Number of tabulated data. For distributed aerodynamic control this could be > 1
+        self.n_xy = n_xy = rotorse_options["n_xy"]  # Number of coordinate points to describe the airfoil geometry
+
+        # Polars and coordinates interpolated along span
+        self.add_input(
+            "s",
+            val=np.zeros(n_span),
+            desc="1D array of the non-dimensional spanwise grid defined along blade axis (0-blade root, 1-blade tip)",
+        )
+        self.add_input(
+            "r_thick_interp_yaml",
+            val=np.zeros(n_span),
+            desc="1D array of the relative thicknesses of the blade defined along span.",
+        )
+        self.add_input(
+            "ac_interp_yaml",
+            val=np.zeros(n_span),
+            desc="1D array of the aerodynamic center of the blade defined along span.",
+        )
+        self.add_input(
+            "aoa",
+            val=np.zeros(n_aoa),
+            units="rad",
+            desc="1D array of the angles of attack used to define the polars of the airfoils. All airfoils defined in openmdao share this grid.",
+        )
+        self.add_input(
+            "cl_interp_yaml",
+            val=np.zeros((n_span, n_aoa, n_Re, n_tab)),
+            desc="4D array with the lift coefficients of the airfoils. Dimension 0 is along the blade span for n_span stations, dimension 1 is along the angles of attack, dimension 2 is along the Reynolds number, dimension 3 is along the number of tabs, which may describe multiple sets at the same station, for example in presence of a flap.",
+        )
+        self.add_input(
+            "cd_interp_yaml",
+            val=np.zeros((n_span, n_aoa, n_Re, n_tab)),
+            desc="4D array with the drag coefficients of the airfoils. Dimension 0 is along the blade span for n_span stations, dimension 1 is along the angles of attack, dimension 2 is along the Reynolds number, dimension 3 is along the number of tabs, which may describe multiple sets at the same station, for example in presence of a flap.",
+        )
+        self.add_input(
+            "cm_interp_yaml",
+            val=np.zeros((n_span, n_aoa, n_Re, n_tab)),
+            desc="4D array with the moment coefficients of the airfoils. Dimension 0 is along the blade span for n_span stations, dimension 1 is along the angles of attack, dimension 2 is along the Reynolds number, dimension 3 is along the number of tabs, which may describe multiple sets at the same station, for example in presence of a flap.",
+        )
+        self.add_input(
+            "coord_xy_interp_yaml",
+            val=np.zeros((n_span, n_xy, 2)),
+            desc="3D array of the non-dimensional x and y airfoil coordinates of the airfoils interpolated along span for n_span stations. The leading edge is place at x=0 and y=0.",
+        )
+        self.add_input("s_opt_r_thick", val=np.ones(aero_shape_opt_options["t/c"]["n_opt"]))
+        self.add_input(
+            "r_thick_opt",
+            val=np.ones(aero_shape_opt_options["t/c"]["n_opt"]),
+        )
+        self.add_input("s_opt_L_D", val=np.ones(aero_shape_opt_options["L/D"]["n_opt"]))
+        self.add_input(
+            "L_D_opt",
+            val=np.ones(aero_shape_opt_options["L/D"]["n_opt"]),
+        )
+        self.add_input(
+            "chord", val=np.zeros(n_span), units="m", desc="1D array of the chord values defined along blade span."
+        )
+        self.add_input("rated_TSR", val=0.0, desc="Constant tip speed ratio in region II.")
+
+    def compute(self, inputs, outputs):
+
+        try:
+            from INN_interface.INN import INN
+        except:
+            raise Exception("The INN framework for airfoil design is activated, but not installed correctly")
+        import matplotlib
+
+        matplotlib.use("TkAgg")
+        import matplotlib.pyplot as plt
+        from wisdem.ccblade.Polar import Polar
+
+        # Interpolate t/c and L/D from opt grid to full grid
+        spline = PchipInterpolator
+        r_thick_spline = spline(inputs["s_opt_r_thick"], inputs["r_thick_opt"])
+        r_thick = r_thick_spline(inputs["s"])
+        L_D_spline = spline(inputs["s_opt_L_D"], inputs["L_D_opt"])
+        L_D = L_D_spline(inputs["s"])
+
+        # Find indices for start and end of the optimization
+        max_t_c = self.options["rotorse_options"]["inn_af_max_t/c"]
+        min_t_c = self.options["rotorse_options"]["inn_af_min_t/c"]
+        r_thick_index_start = np.argmin(abs(r_thick - max_t_c))
+        r_thick_index_end = np.argmin(abs(r_thick - min_t_c))
+
+        for i in range(r_thick_index_start, r_thick_index_end):
+            cd = 0.015
+            stall_margin = 5.0
+            Re = 9000000.0
+            inn = INN()
+            try:
+                cst, alpha = inn.inverse_design(cd, L_D[i], stall_margin, r_thick[i], Re, N=1, process_samples=True)
+            except:
+                raise Exception("The INN for airfoil design failed in the inverse mode")
+            alpha = np.arange(-4, 20, 0.25)
+            try:
+                cd, cl = inn.generate_polars(cst, Re, alpha=alpha)
+            except:
+                raise Exception("The INN for airfoil design failed in the forward mode")
+
+            inn_polar = Polar(Re, alpha, cl[0, :], cd[0, :], np.zeros_like(cl[0, :]))
+            polar3d = inn_polar.correction3D(inputs["s"][i], inputs["chord"][i] / 103.0, inputs["rated_TSR"])
+            cdmax = 1.5
+            polar = polar3d.extrapolate(cdmax)  # Extrapolate polars for alpha between -180 deg and 180 deg
+
+            cl_interp = np.interp(np.degrees(inputs["aoa"]), polar.alpha, polar.cl)
+            cd_interp = np.interp(np.degrees(inputs["aoa"]), polar.alpha, polar.cd)
+            cm_interp = np.interp(np.degrees(inputs["aoa"]), polar.alpha, polar.cm)
+
+            f, ax = plt.subplots(3, 1, figsize=(5.3, 8))
+            ax[0].plot(inputs["aoa"] * 180.0 / np.pi, cl_interp, label="INN")
+            ax[0].plot(inputs["aoa"] * 180.0 / np.pi, inputs["cl_interp_yaml"][i, :, 0, 0], label="yaml")
+            ax[0].grid(color=[0.8, 0.8, 0.8], linestyle="--")
+            ax[0].legend()
+            ax[0].set_ylabel("CL (-)", fontweight="bold")
+            ax[0].set_title("Span Location {:2.2%}".format(inputs["s"][i]), fontweight="bold")
+            ax[0].set_xlim(left=-4, right=20)
+            ax[1].semilogy(inputs["aoa"] * 180.0 / np.pi, cd_interp, label="INN")
+            ax[1].semilogy(inputs["aoa"] * 180.0 / np.pi, inputs["cd_interp_yaml"][i, :, 0, 0], label="yaml")
+            ax[1].grid(color=[0.8, 0.8, 0.8], linestyle="--")
+            ax[1].set_ylabel("CD (-)", fontweight="bold")
+            ax[1].set_xlim(left=-4, right=20)
+            ax[2].plot(inputs["aoa"] * 180.0 / np.pi, cl_interp / cd_interp, label="INN")
+            ax[2].plot(
+                inputs["aoa"] * 180.0 / np.pi,
+                inputs["cl_interp_yaml"][i, :, 0, 0] / inputs["cd_interp_yaml"][i, :, 0, 0],
+                label="yaml",
+            )
+            ax[2].grid(color=[0.8, 0.8, 0.8], linestyle="--")
+            ax[2].set_ylabel("CL/CD (-)", fontweight="bold")
+            ax[2].set_xlabel("Angles of Attack (deg)", fontweight="bold")
+            ax[2].set_xlim(left=-4, right=20)
+            ax[2].set_ylim(top=200, bottom=-50)
+            # plt.show()
+            plt.close()
 
 
 class Blade_Lofted_Shape(om.ExplicitComponent):
@@ -1726,6 +1959,9 @@ def calc_axis_intersection(xy_coord, rotation, offset, p_le_d, side, thk=0.0):
 
 class Hub(om.Group):
     # Openmdao group with the hub data coming from the input yaml file.
+    def initialize(self):
+        self.options.declare("flags")
+
     def setup(self):
         ivc = self.add_subsystem("hub_indep_vars", om.IndepVarComp(), promotes=["*"])
 
@@ -1737,19 +1973,20 @@ class Hub(om.Group):
         )
         # ivc.add_output('drag_coeff',   val=0.0,                desc='Drag coefficient to estimate the aerodynamic forces generated by the hub.') # GB: this doesn't connect to anything
         ivc.add_output("diameter", val=0.0, units="m")
-        ivc.add_output("flange_t2shell_t", val=0.0)
-        ivc.add_output("flange_OD2hub_D", val=0.0)
-        ivc.add_output("flange_ID2flange_OD", val=0.0)
-        ivc.add_output("hub_stress_concentration", val=0.0)
-        ivc.add_discrete_output("n_front_brackets", val=0)
-        ivc.add_discrete_output("n_rear_brackets", val=0)
-        ivc.add_output("clearance_hub_spinner", val=0.0, units="m")
-        ivc.add_output("spin_hole_incr", val=0.0)
-        ivc.add_output("pitch_system_scaling_factor", val=0.54)
-        ivc.add_output("spinner_gust_ws", val=70.0, units="m/s")
-        ivc.add_output("hub_in2out_circ", val=1.2)
-        ivc.add_discrete_output("hub_material", val="steel")
-        ivc.add_discrete_output("spinner_material", val="carbon")
+        if self.options["flags"]["hub"]:
+            ivc.add_output("flange_t2shell_t", val=0.0)
+            ivc.add_output("flange_OD2hub_D", val=0.0)
+            ivc.add_output("flange_ID2flange_OD", val=0.0)
+            ivc.add_output("hub_stress_concentration", val=0.0)
+            ivc.add_discrete_output("n_front_brackets", val=0)
+            ivc.add_discrete_output("n_rear_brackets", val=0)
+            ivc.add_output("clearance_hub_spinner", val=0.0, units="m")
+            ivc.add_output("spin_hole_incr", val=0.0)
+            ivc.add_output("pitch_system_scaling_factor", val=0.54)
+            ivc.add_output("spinner_gust_ws", val=70.0, units="m/s")
+            ivc.add_output("hub_in2out_circ", val=1.2)
+            ivc.add_discrete_output("hub_material", val="steel")
+            ivc.add_discrete_output("spinner_material", val="carbon")
 
         exec_comp = om.ExecComp(
             "radius = 0.5 * diameter",
@@ -1924,7 +2161,7 @@ class Floating(om.Group):
             ivc.add_output("ring_stiffener_web_thickness", 0.0, units="m")
             ivc.add_output("ring_stiffener_flange_width", 0.0, units="m")
             ivc.add_output("ring_stiffener_flange_thickness", 0.0, units="m")
-            ivc.add_output("ring_stiffener_spacing", 0.0, units="m")
+            ivc.add_output("ring_stiffener_spacing", 0.0)
             ivc.add_output("axial_stiffener_web_height", 0.0, units="m")
             ivc.add_output("axial_stiffener_web_thickness", 0.0, units="m")
             ivc.add_output("axial_stiffener_flange_width", 0.0, units="m")
@@ -2104,8 +2341,6 @@ class Mooring(om.Group):
 
         n_nodes = mooring_init_options["n_nodes"]
         n_lines = mooring_init_options["n_lines"]
-        n_line_types = mooring_init_options["n_line_types"]
-        # n_anchor_types = mooring_init_options["n_anchor_types"]
 
         n_design = 1 if mooring_init_options["symmetric"] else n_lines
 
@@ -2121,8 +2356,6 @@ class Mooring(om.Group):
         ivc.add_discrete_output("nodes_joint_name", val=[""] * n_nodes)
         ivc.add_output("unstretched_length_in", val=np.zeros(n_design), units="m")
         ivc.add_discrete_output("line_id", val=[""] * n_lines)
-        # ivc.add_discrete_output("n_lines", val=n_lines)
-        ivc.add_discrete_output("line_type_names", val=[""] * n_line_types)  ## For MoorDyn
         ivc.add_output("line_diameter_in", val=np.zeros(n_design), units="m")
         ivc.add_output("line_mass_density_coeff", val=np.zeros(n_lines), units="kg/m**3")
         ivc.add_output("line_stiffness_coeff", val=np.zeros(n_lines), units="N/m**2")
@@ -2132,11 +2365,10 @@ class Mooring(om.Group):
         ivc.add_output("line_tangential_added_mass_coeff", val=np.zeros(n_lines), units="kg/m**3")
         ivc.add_output("line_transverse_drag_coeff", val=np.zeros(n_lines), units="N/m**2")
         ivc.add_output("line_tangential_drag_coeff", val=np.zeros(n_lines), units="N/m**2")
-        # ivc.add_discrete_output("anchor_names", val=[""] * n_anchor_types)
         ivc.add_output("anchor_mass", val=np.zeros(n_lines), units="kg")
         ivc.add_output("anchor_cost", val=np.zeros(n_lines), units="USD")
-        ivc.add_output("anchor_max_vertical_load", val=np.zeros(n_lines), units="N")
-        ivc.add_output("anchor_max_lateral_load", val=np.zeros(n_lines), units="N")
+        ivc.add_output("anchor_max_vertical_load", val=1e30 * np.ones(n_lines), units="N")
+        ivc.add_output("anchor_max_lateral_load", val=1e30 * np.ones(n_lines), units="N")
 
         self.add_subsystem("moorprop", MooringProperties(mooring_init_options=mooring_init_options), promotes=["*"])
         self.add_subsystem("moorjoint", MooringJoints(options=self.options["options"]), promotes=["*"])
@@ -2175,22 +2407,44 @@ class MooringProperties(om.ExplicitComponent):
 
     def compute(self, inputs, outputs):
         n_lines = self.options["mooring_init_options"]["n_lines"]
+        line_mat = self.options["mooring_init_options"]["line_material"]
         outputs["line_diameter"] = d = inputs["line_diameter_in"] * np.ones(n_lines)
         outputs["unstretched_length"] = inputs["unstretched_length_in"] * np.ones(n_lines)
-
         d2 = d * d
-        varlist = [
-            "line_mass_density",
-            "line_stiffness",
-            "line_breaking_load",
-            "line_cost_rate",
-            "line_transverse_added_mass",
-            "line_tangential_added_mass",
-            "line_transverse_drag",
-            "line_tangential_drag",
-        ]
-        for var in varlist:
-            outputs[var] = d2 * inputs[var + "_coeff"]
+
+        line_obj = None
+        if line_mat[0] == "custom":
+            varlist = [
+                "line_mass_density",
+                "line_stiffness",
+                "line_breaking_load",
+                "line_cost_rate",
+                "line_transverse_added_mass",
+                "line_tangential_added_mass",
+                "line_transverse_drag",
+                "line_tangential_drag",
+            ]
+            for var in varlist:
+                outputs[var] = d2 * inputs[var + "_coeff"]
+
+        elif line_mat[0] == "chain_stud":
+            line_obj = mp.getLineProps(1e3 * d[0], type="chain", stud="stud")
+        else:
+            line_obj = mp.getLineProps(1e3 * d[0], type=line_mat[0])
+
+        if not line_obj is None:
+            outputs["line_mass_density"] = line_obj.mlin
+            outputs["line_stiffness"] = line_obj.EA
+            outputs["line_breaking_load"] = line_obj.MBL
+            outputs["line_cost_rate"] = line_obj.cost
+            varlist = [
+                "line_transverse_added_mass",
+                "line_tangential_added_mass",
+                "line_transverse_drag",
+                "line_tangential_drag",
+            ]
+            for var in varlist:
+                outputs[var] = d2 * inputs[var + "_coeff"]
 
 
 class MooringJoints(om.ExplicitComponent):
