@@ -43,7 +43,6 @@ class LinearFAST(runFAST_pywrapper_batch):
         self.FAST_InputFile     = None
         self.FAST_directory     = None
         self.FAST_runDirectory  = None
-        self.debug_level        = 0
         self.dev_branch         = True
 
         self.read_yaml          = False
@@ -65,6 +64,7 @@ class LinearFAST(runFAST_pywrapper_batch):
         self.wind_speeds         = [15]
         self.DOFs               = ['GenDOF','TwFADOF1']
         self.TMax               = 2000.
+        self.TStart             = 0.
         self.DT                 = 0.01
         self.NLinTimes          = 12
         self.TrimGain           = 1.e-4
@@ -77,7 +77,7 @@ class LinearFAST(runFAST_pywrapper_batch):
         self.HydroStates        = False         # should probably be false by default  
 
         # simulation setup
-        self.cores              = 4
+        self.cores              = 1
 
         # overwrite steady & linearizations
         self.overwrite          = True
@@ -104,6 +104,7 @@ class LinearFAST(runFAST_pywrapper_batch):
         ## Generate case list using General Case Generator
         ## Specify several variables that change independently or collectly
         case_inputs = {}
+        case_inputs[("Fst","TStart")] = {'vals':[self.TStart], 'group':0}
         case_inputs[("Fst","TMax")] = {'vals':[self.TMax], 'group':0}
         case_inputs[("Fst","Linearize")] = {'vals':['True'], 'group':0}
         case_inputs[("Fst","CalcSteady")] = {'vals':['True'], 'group':0}        # potential modelling input, but only Trim solution supported for now
@@ -184,7 +185,6 @@ class LinearFAST(runFAST_pywrapper_batch):
         case_inputs[("HydroDyn","DiffQTF")]     = {'vals':[0], 'group':0}
         case_inputs[("HydroDyn","WvDiffQTF")]   = {'vals':['False'], 'group':0}
         case_inputs[("HydroDyn","WvSumQTF")]    = {'vals':['False'], 'group':0}
-        case_inputs[("HydroDyn","PotMod")]      = {'vals':[1], 'group':0}
         case_inputs[("HydroDyn","RdtnDT")]      = {'vals':['default'], 'group':0}
         
         # Degrees-of-freedom: set all to False & enable those defined in modelling inputs
@@ -253,7 +253,7 @@ class LinearFAST(runFAST_pywrapper_batch):
         # Generate Cases
         case_list, case_name_list = CaseGen_General(case_inputs, dir_matrix=self.FAST_runDirectory, namebase='lin')
         self.case_list      = case_list
-        self.cast_name_list = case_name_list
+        self.case_name_list = case_name_list
 
         return case_list, case_name_list
 
@@ -268,21 +268,6 @@ class LinearFAST(runFAST_pywrapper_batch):
         Only needs to be performed once for each model
 
         """
-
-        # do a read to get gearbox ratio
-        fastRead = InputReader_OpenFAST()
-        fastRead.FAST_InputFile = self.FAST_InputFile   # FAST input file (ext=.fst)
-        fastRead.FAST_directory = self.FAST_directory   # Path to fst directory files
-
-        fastRead.execute()
-
-        # linearization setup
-        self.GBRatio          = fastRead.fst_vt['ElastoDyn']['GBRatio']
-        self.fst_vt           = fastRead.fst_vt
-    
-        # run linearizations
-        self.case_list, self.case_name_list = self.gen_linear_cases()
-
         # Let runFAST_pywrapper check for files
         if not self.overwrite:
             self.overwrite_outfiles = False  
