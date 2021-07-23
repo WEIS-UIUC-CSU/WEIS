@@ -120,3 +120,8 @@ results/
 
 # Turbsim
 wind/
+
+# pyHAMS
+pyHAMS/pyhams/src/libhams-f2pywrappers2.f90
+pyHAMS/pyhams/src/libhamsmodule.c
+
