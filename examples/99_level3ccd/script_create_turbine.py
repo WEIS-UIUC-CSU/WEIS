@@ -34,7 +34,7 @@ tt = time.time()
 p_tower_div = 12
 p_tower_bottom_height = 15.0
 p_tower_bottom_diameter = 10.0
-d_hub_height = 150.0
+d_hub_height = 170.0
 d_tower_top_diameter = 6.5
 d_rotor_diameter = 242.25
 
@@ -59,7 +59,11 @@ tower_grd_new = np.interp(
     [0.0, 1.0]
 )
 tower_diameter_new = p_tower_bottom_diameter*np.ones(tower_zcoord_new.shape, dtype=float)
-tower_diameter_interp1d = interp1d(tower_val, tower_dia, kind='cubic')
+tower_diameter_interp1d = interp1d(
+    tower_val[0] + (np.array(tower_val) - tower_val[0])*(tower_zcoord_new[-1] - tower_zcoord_new[0])/(tower_val[-1] - tower_val[0]),
+    tower_dia,
+    kind='cubic'
+)
 tower_diameter_fill = tower_diameter_interp1d(np.linspace(tower_zcoord_new[3], tower_top_height, p_tower_div - 1))
 for tidx in range(4, tower_diameter_new.shape[0]):
     if np.remainder(tidx, 2) == 0:
