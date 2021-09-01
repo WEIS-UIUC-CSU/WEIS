@@ -1,8 +1,8 @@
 #import os
 #from weis.glue_code.runWEIS     import run_weis
 
-import numpy as np
-import os, sys, time
+#import numpy as np
+import os, sys #, time
 import openmdao.api as om
 
 from weis.glue_code.gc_LoadInputs     import WindTurbineOntologyPythonWEIS
@@ -13,6 +13,16 @@ from wisdem.commonse.mpi_tools        import MPI
 from wisdem.commonse                  import fileIO
 from weis.glue_code.gc_ROSCOInputs    import assign_ROSCO_values
 
+if MPI:
+    from wisdem.commonse.mpi_tools import map_comm_heirarchical, subprocessor_loop, subprocessor_stop
+    max_cores = MPI.COMM_WORLD.Get_size()
+    rank = MPI.COMM_WORLD.Get_rank()
+    color_i = 0
+else:
+    max_cores = 1
+    rank = 0
+    color_i = 0
+
 #mydir = os.path.dirname(os.path.realpath(__file__))  # get path to this file
 mydir = '/Users/yonghoonlee/Dropbox/ATLANTIS_WEIS/WEIS/examples/99_level3ccd'
 fname_wt_input         = mydir + os.sep + "test_turbine.yaml"
@@ -21,168 +31,48 @@ fname_analysis_options = mydir + os.sep + "analysis_options.yaml"
 
 #wt_opt, modeling_options, analysis_options = run_weis(fname_wt_input, fname_modeling_options, fname_analysis_options)
 
-if MPI:
-    from wisdem.commonse.mpi_tools import map_comm_heirarchical, subprocessor_loop, subprocessor_stop
-
 wt_initial = WindTurbineOntologyPythonWEIS(fname_wt_input, fname_modeling_options, fname_analysis_options)
 wt_init, modeling_options, analysis_options = wt_initial.get_input_data()
 myopt = PoseOptimizationWEIS(wt_init, modeling_options, analysis_options)
 
-# Determine how tasks are assigned to MPI cores
-if MPI:
-    n_DV = myopt.get_number_design_variables()
-    print('n_DV = {:}'.format(n_DV))
-    
-    # Extract the number of cores available
-    max_cores = MPI.COMM_WORLD.Get_size()
-    print('max_cores = {:}'.format(max_cores))
-
-    # Define the color map for the parallelization, determining the maximum number of parallel finite difference (FD) 
-    # evaluations based on the number of design variables (DV). OpenFAST on/off changes things.
-    if modeling_options['Level3']['flag']:
-        # If openfast is called, the maximum number of FD is the number of DV, if we have the number of cores available that doubles the number of DVs, 
-        # otherwise it is half of the number of DV (rounded to the lower integer). 
-        # We need this because a top layer of cores calls a bottom set of cores where OpenFAST runs.
-        if max_cores > 2. * n_DV:
-            n_FD = n_DV
-        else:
-            n_FD = int(np.floor(max_cores / 2))
-        # Get the number of OpenFAST runs from the user input and the max that can run in parallel given the resources
-        # The number of OpenFAST runs is the minimum between the actual number of requested OpenFAST simulations, and 
-        # the number of cores available (minus the number of DV, which sit and wait for OF to complete)
-        n_OF_runs = modeling_options['DLC_driver']['n_cases']
-        n_DV = max([n_DV, 1])
-        max_parallel_OF_runs = max([int(np.floor((max_cores - n_DV) / n_DV)), 1])
-        n_OF_runs_parallel = min([int(n_OF_runs), max_parallel_OF_runs])
-    else:
-        # If OpenFAST is not called, the number of parallel calls to compute the FDs is just equal to the minimum of cores available and DV
-        n_FD = min([max_cores, n_DV])
-        n_OF_runs_parallel = 1
-    
-    # Define the color map for the cores (how these are distributed between finite differencing and openfast runs)
-    if analysis_options['driver']['design_of_experiments']['flag']:
-        n_FD = MPI.COMM_WORLD.Get_size()
-        n_OF_runs_parallel = 1
-        rank    = MPI.COMM_WORLD.Get_rank()
-        comm_map_up = comm_map_down = {}
-        for r in range(MPI.COMM_WORLD.Get_size()):
-            comm_map_up[r] = [r]
-        color_i = 0
-    else:
-        n_FD = max([n_FD, 1])
-        comm_map_down, comm_map_up, color_map = map_comm_heirarchical(n_FD, n_OF_runs_parallel)
-        rank    = MPI.COMM_WORLD.Get_rank()
-        color_i = color_map[rank]
-        comm_i  = MPI.COMM_WORLD.Split(color_i, 1)
-
-else:
-    color_i = 0
-    rank = 0
+# Solve OpenFAST in serial, populations in parallel
+n_OF_runs_parallel = 1
+max_parallel_OF_runs = 1
+n_POP_parallel = max_cores
+comm_map_up = comm_map_down = {}
+for r in range(max_cores):
+    comm_map_up[r] = [r]
 
 folder_output = analysis_options['general']['folder_output']
-if rank == 0 and not os.path.isdir(folder_output):
-    os.makedirs(folder_output)
+if rank == 0:
+    if not os.path.isdir(folder_output):
+        os.makedirs(folder_output)
 
-if color_i == 0: # the top layer of cores enters, the others sit and wait to run openfast simulations
-    # if MPI and opt_options['driver']['optimization']['flag']:
-    if MPI:
-        if modeling_options['Level3']['flag']:
-            # Parallel settings for OpenFAST
-            modeling_options['DLC_driver']['openfast_file_management']['mpi_run'] = True
-            modeling_options['DLC_driver']['openfast_file_management']['mpi_comm_map_down'] = comm_map_down
-            if opt_options['driver']['design_of_experiments']['flag']:
-                modeling_options['DLC_driver']['openfast_file_management']['cores'] = 1
-            else:
-                modeling_options['DLC_driver']['openfast_file_management']['cores'] = n_OF_runs_parallel            
-        
-        # Parallel settings for OpenMDAO
-        if opt_options['driver']['design_of_experiments']['flag']:  
-            wt_opt = om.Problem(model=WindPark(modeling_options = modeling_options, opt_options = opt_options))
-        else:
-            wt_opt = om.Problem(model=om.Group(num_par_fd=n_FD), comm=comm_i)
-            wt_opt.model.add_subsystem('comp', WindPark(modeling_options = modeling_options, opt_options = opt_options), promotes=['*'])
-    else:
-        # Sequential finite differencing and openfast simulations
-        modeling_options['DLC_driver']['openfast_file_management']['mpi_run'] = False
-        modeling_options['DLC_driver']['openfast_file_management']['cores']   = 1
-        wt_opt = om.Problem(model=WindPark(modeling_options = modeling_options, opt_options = opt_options))
+modeling_options['General']['openfast_configuration']['mpi_run'] = False
+modeling_options['General']['openfast_configuration']['cores']   = 1
+modeling_options['General']['openfast_configuration']['OF_run_dir'] += (os.sep + 'rank_' + str(rank))
+wt_opt = om.Problem(model=WindPark(modeling_options = modeling_options, opt_options = analysis_options))
+wt_opt = myopt.set_recorders(wt_opt)
+wt_opt.driver.options['debug_print'] = ['desvars','ln_cons','nl_cons','objs','totals']
 
-    # If at least one of the design variables is active, setup an optimization
-    if opt_options['opt_flag']:
-        wt_opt = myopt.set_driver(wt_opt)
-        wt_opt = myopt.set_objective(wt_opt)
-        wt_opt = myopt.set_design_variables(wt_opt, wt_init)
-        wt_opt = myopt.set_constraints(wt_opt)
+wt_opt.setup(derivatives=False)
 
-        if opt_options['driver']['design_of_experiments']['flag']:
-            wt_opt.driver.options['debug_print'] = ['desvars','ln_cons','nl_cons','objs']
-            wt_opt.driver.options['procs_per_model'] = 1 # n_OF_runs_parallel # int(max_cores / np.floor(max_cores/n_OF_runs))
-    
-    wt_opt = myopt.set_recorders(wt_opt)
-    wt_opt.driver.options['debug_print'] = ['desvars','ln_cons','nl_cons','objs','totals']
-    
-    # Setup openmdao problem
-    if opt_options['opt_flag']:
-        wt_opt.setup()
-    else:
-        # If we're not performing optimization, we don't need to allocate
-        # memory for the derivative arrays.
-        wt_opt.setup(derivatives=False)
-    
-    # Load initial wind turbine data from wt_initial to the openmdao problem
-    wt_opt = yaml2openmdao(wt_opt, modeling_options, wt_init, opt_options)
-    wt_opt = assign_ROSCO_values(wt_opt, modeling_options, wt_init['control'])
-    wt_opt = myopt.set_initial(wt_opt, wt_init)
-    if modeling_options['Level3']['flag']:
-        wt_opt = myopt.set_initial_weis(wt_opt)
-    
-    # If the user provides values in this dict, they overwrite
-    # whatever values have been set by the yaml files.
-    # This is useful for performing black-box wrapped optimization without
-    # needing to modify the yaml files.
-    # Some logic is used here if the user gives a smalller size for the
-    # design variable than expected to input the values into the end
-    # of the array.
-    # This is useful when optimizing twist, where the first few indices
-    # do not need to be optimized as they correspond to a circular cross-section.
-    if overridden_values is not None:
-        for key in overridden_values:
-            num_values = np.array(overridden_values[key]).size
-            key_size = wt_opt[key].size
-            idx_start = key_size - num_values
-            wt_opt[key][idx_start:] = overridden_values[key]
+# Load initial wind turbine data from wt_initial to the openmdao problem
+wt_opt = yaml2openmdao(wt_opt, modeling_options, wt_init, analysis_options)
+wt_opt = assign_ROSCO_values(wt_opt, modeling_options, wt_init['control'])
+wt_opt = myopt.set_initial(wt_opt, wt_init)
+wt_opt = myopt.set_restart(wt_opt)
+sys.stdout.flush()
 
-    # Place the last design variables from a previous run into the problem.
-    # This needs to occur after the above setup() and yaml2openmdao() calls
-    # so these values are correctly placed in the problem.
-    wt_opt = myopt.set_restart(wt_opt)
+# Run OpenMDAO problem
+wt_opt.run_model()
 
-    if 'check_totals' in opt_options['driver']['optimization']:
-        if opt_options['driver']['optimization']['check_totals']:
-            wt_opt.run_model()
-            totals = wt_opt.compute_totals()
-    
-    if 'check_partials' in opt_options['driver']['optimization']:
-        if opt_options['driver']['optimization']['check_partials']:
-            wt_opt.run_model()
-            checks = wt_opt.check_partials(compact_print=True)
-            
-    sys.stdout.flush()
-    # Run openmdao problem
-    if opt_options['opt_flag']:
-        wt_opt.run_driver()
-    else:
-        wt_opt.run_model()
+# Save data
+froot_out = os.path.join(folder_output, analysis_options['general']['fname_output']) + (os.sep + 'rank_' + str(rank))
+wt_initial.update_ontology_control(wt_opt)
+modeling_options['General']['openfast_configuration']['fst_vt'] = {}
+wt_initial.write_ontology(wt_opt, froot_out)
+wt_initial.write_options(froot_out)
 
-    if (not MPI) or (MPI and rank == 0):
-        # Save data coming from openmdao to an output yaml file
-        froot_out = os.path.join(folder_output, opt_options['general']['fname_output'])
-        wt_initial.update_ontology_control(wt_opt)
-        # Remove the fst_vt key from the dictionary and write out the modeling options
-        modeling_options['DLC_driver']['openfast_file_management']['fst_vt'] = {}
-        wt_initial.write_ontology(wt_opt, froot_out)
-        wt_initial.write_options(froot_out)
-        
-        # Save data to numpy and matlab arrays
-        fileIO.save_data(froot_out, wt_opt)
-
+# Save data to numpy and matlab arrays
+fileIO.save_data(froot_out, wt_opt)
