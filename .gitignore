@@ -33,6 +33,9 @@ generated
 # XCode
 *.xcodeproj
 
+# Spyder
+.spyproject/
+
 # C extensions
 *.so
 *.dSYM
