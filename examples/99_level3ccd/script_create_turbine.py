@@ -31,6 +31,9 @@ def visualize_tower(wt):
     print('tower thickness at top = {:}'.format(tower_thickness_values[-3]))
     print('tower thickness at yaw control device = {:}'.format(tower_thickness_values[-1]))
 
+    plt.plot(tower_z_values, tower_thickness_values)
+    plt.show()
+
 run_dir = os.path.dirname( os.path.realpath(__file__) ) + os.sep
 wisdem_examples = os.path.join(os.path.dirname( os.path.dirname( os.path.dirname( os.path.realpath(__file__) ) ) ), "WISDEM", "examples")
 fname_wt_input = os.path.join(wisdem_examples, "02_reference_turbines", "IEA-15-240-RWT.yaml")
@@ -80,7 +83,7 @@ tower_grd_new = np.interp(
 )
 tower_diameter_new = p_tower_bottom_diameter*np.ones(tower_zcoord_new.shape, dtype=float)
 tower_diameter_interp1d = interp1d(
-    tower_val[0] + (np.array(tower_val) - tower_val[0])*(tower_zcoord_new[-1] - tower_zcoord_new[0])/(tower_val[-1] - tower_val[0]),
+    p_tower_bottom_height + (np.array(tower_val) - tower_val[0])*(tower_zcoord_new[-1] - tower_zcoord_new[0])/(tower_val[-1] - tower_val[0]),
     tower_dia,
     kind='cubic'
 )
