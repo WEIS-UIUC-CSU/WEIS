@@ -26,7 +26,10 @@ class turbine_design:
     def __init__(self, **kwargs):
 
         self.weis_root = os.path.dirname(os.path.dirname(os.path.abspath(weis.__file__)))
-        self.run_path = os.path.dirname(os.path.abspath(__file__))
+        try:
+            self.run_path = os.path.dirname(os.path.abspath(__file__))
+        except:
+            self.run_path = os.path.abspath(os.curdir)
 
         if 'wt_name' in kwargs.keys():
             wt_name = kwargs['wt_name']
@@ -287,6 +290,8 @@ class turbine_design:
         wt_opt = myopt.set_initial(wt_opt, turbine_model)
         wt_opt.run_model()
         
+        self.modeling_options = modeling_options
+        self.analysis_options = analysis_options
         self.result = wt_opt
 
     def visualize_turbine(self):
@@ -428,12 +433,6 @@ class sql_design:
         dbdirpath = os.path.dirname(self.dbpath)
         if not os.path.isdir(dbdirpath):
             os.makedirs(dbdirpath)
-            
-        if os.path.isfile(self.dbpath):
-            try:
-                os.remove(self.dbpath)
-            except OSError:
-                print('DB file cannot be removed.')
         
         conn = None
         try:
@@ -446,6 +445,15 @@ class sql_design:
             self.cursor = self.conn.cursor()
         else:
             self.cursor = None
+            
+            
+    def remove_db(self):
+        if os.path.isfile(self.dbpath):
+            try:
+                os.remove(self.dbpath)
+            except OSError:
+                print('DB file cannot be removed.')
+        
         
     def close_connection(self):
         
@@ -592,6 +600,7 @@ if __name__ == '__main__':
     
     # Create DB for design point management
     d = sql_design(dbpath = 'temp/linear_data.db')
+    d.remove_db()
     
     # Add DP#1
     design = {
@@ -628,6 +637,9 @@ if __name__ == '__main__':
         'water_depth': 30.0
     }
     d.add_data(design, param)
+    
+    # Commit to DB
+    d.conn.commit()
     
     # Get the list of DPs in the DB
     id_list = d.get_design_id()
