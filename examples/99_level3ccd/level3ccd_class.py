@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import openmdao.api as om
 import weis
+import sqlite3
 
 from weis.glue_code.gc_LoadInputs           import WindTurbineOntologyPythonWEIS
 from wisdem.glue_code.gc_WT_InitModel       import yaml2openmdao
@@ -18,6 +19,7 @@ from scipy.interpolate                      import interp1d
 from matplotlib                             import pyplot as plt
 from matplotlib.patches                     import (Rectangle, Circle)
 from copy                                   import deepcopy
+
 
 class turbine_design:
 
@@ -63,7 +65,7 @@ class turbine_design:
         self._p_tower_div_default = 11
         self._p_tower_bottom_height_default = 15.0
         self._p_tower_bottom_diameter_default = 10.0
-        self._p_tower_top_thickness_default = 0.023998
+        self._p_tower_yaw_thickness_default = 0.023998
         self._p_monopile_bottom_height_default = -75.0
         self._p_water_depth_default = 30.0
 
@@ -96,10 +98,10 @@ class turbine_design:
         else:
             p_tower_bottom_diameter = self._p_tower_bottom_diameter_default
         # Tower top thickness
-        if 'tower_top_thickness' in self.param.keys():
-            p_tower_top_thickness = self.param['tower_top_thickness']
+        if 'tower_yaw_thickness' in self.param.keys():
+            p_tower_yaw_thickness = self.param['tower_yaw_thickness']
         else:
-            p_tower_top_thickness = self._p_tower_top_thickness_default
+            p_tower_yaw_thickness = self._p_tower_yaw_thickness_default
         # Monopile bottom height
         if 'monopile_bottom_height' in self.param.keys():
             p_monopile_bottom_height = self.param['monopile_bottom_height']
@@ -116,7 +118,7 @@ class turbine_design:
             'tower_div': p_tower_div,
             'tower_bottom_height': p_tower_bottom_height,
             'tower_bottom_diameter': p_tower_bottom_diameter,
-            'tower_top_thickness': p_tower_top_thickness,
+            'tower_yaw_thickness': p_tower_yaw_thickness,
             'monopile_bottom_height': p_monopile_bottom_height,
             'water_depth': p_water_depth
         }
@@ -204,8 +206,8 @@ class turbine_design:
         for tidx in range(1, tower_thickness_new.shape[0]-2, 2):
             tower_thickness_new[tidx + 1] = tower_thickness_interp1d(tower_grd_new[tidx + 1]/tower_grd_new[len(tower_grd_new)-3])
             tower_thickness_new[tidx] = tower_thickness_new[tidx + 1]
-        tower_thickness_new[tower_thickness_new.shape[0]-2] = p_tower_top_thickness
-        tower_thickness_new[tower_thickness_new.shape[0]-1] = p_tower_top_thickness
+        tower_thickness_new[tower_thickness_new.shape[0]-2] = p_tower_yaw_thickness
+        tower_thickness_new[tower_thickness_new.shape[0]-1] = p_tower_yaw_thickness
         monopile_z_coord_new = np.interp(
             self._ref_monopile_grd,
             [0.0, 1.0],
@@ -226,8 +228,6 @@ class turbine_design:
         self.turbine_model['components']['monopile']['outer_shape_bem']['outer_diameter']['values'] = (np.ones(shape=(len(self._ref_monopile_dia)), dtype=float)*p_tower_bottom_diameter).tolist()
         self.turbine_model['components']['monopile']['internal_structure_2d_fem']['reference_axis']['z']['values'] = monopile_z_coord_new.tolist()
         self.turbine_model['environment']['water_depth'] = p_water_depth
-        
-        self.design_SN += 1
         
     def compute_cost_only(self):
         
@@ -298,11 +298,11 @@ class turbine_design:
         rotor_diameter = wt['assembly']['rotor_diameter']
         hub_diameter = wt['components']['hub']['diameter']
         hub_height = wt['assembly']['hub_height']
-        tower_z_grid = wt['components']['tower']['outer_shape_bem']['reference_axis']['z']['grid']
+        #tower_z_grid = wt['components']['tower']['outer_shape_bem']['reference_axis']['z']['grid']
         tower_z_values = wt['components']['tower']['outer_shape_bem']['reference_axis']['z']['values']
-        tower_outer_diameter_grid = wt['components']['tower']['outer_shape_bem']['outer_diameter']['grid']
+        #tower_outer_diameter_grid = wt['components']['tower']['outer_shape_bem']['outer_diameter']['grid']
         tower_outer_diameter_values = wt['components']['tower']['outer_shape_bem']['outer_diameter']['values']
-        tower_thickness_grid = wt['components']['tower']['internal_structure_2d_fem']['layers'][0]['thickness']['grid']
+        #tower_thickness_grid = wt['components']['tower']['internal_structure_2d_fem']['layers'][0]['thickness']['grid']
         tower_thickness_values = wt['components']['tower']['internal_structure_2d_fem']['layers'][0]['thickness']['values']
         monopile_z_values = wt['components']['monopile']['outer_shape_bem']['reference_axis']['z']['values']
         water_depth = wt['environment']['water_depth']
@@ -390,41 +390,278 @@ class turbine_design:
         fgs.tight_layout()
         fgs.show()
 
+class sql_design:
+    
+    def __init__(self, **kwargs):
+        
+        self.dbpath = ''
+        self.conn = None
+        self.cursor = None
+        self.design_table_name = 'design'
+        self.param_list = {
+            'tower_div': 'INTEGER',
+            'tower_bottom_height': 'REAL',
+            'tower_bottom_diameter': 'REAL',
+            'tower_yaw_thickness': 'REAL',
+            'monopile_bottom_height': 'REAL',
+            'water_depth': 'REAL'
+        }
+        self.design_list = {
+            'hub_height': 'REAL',
+            'tower_top_diameter': 'REAL',
+            'tower_bottom_thickness': 'REAL',
+            'tower_top_thickness': 'REAL',
+            'rotor_diameter': 'REAL',
+        }
+        
+        for (k, w) in kwargs.items():
+            try:
+                setattr(self, k, w)
+            except:
+                pass
+        
+    def create_connection(self):
+        
+        if self.dbpath == '':
+            raise ValueError('dbpath should be specified.')
+        
+        dbdirpath = os.path.dirname(self.dbpath)
+        if not os.path.isdir(dbdirpath):
+            os.makedirs(dbdirpath)
+            
+        if os.path.isfile(self.dbpath):
+            try:
+                os.remove(self.dbpath)
+            except OSError:
+                print('DB file cannot be removed.')
+        
+        conn = None
+        try:
+            conn = sqlite3.connect(self.dbpath)
+        except sqlite3.Error as e:
+            print(e)
+            
+        self.conn = conn
+        if self.conn:
+            self.cursor = self.conn.cursor()
+        else:
+            self.cursor = None
+        
+    def close_connection(self):
+        
+        if self.cursor:
+            self.cursor.close()
+        
+        if self.conn:
+            self.conn.close()
+        
+        
+    def create_table(self):
+        
+        if self.conn == None:
+            raise Exception('DB is not connected.')
+            
+        if self.cursor == None:
+            try:
+                self.cursor = self.conn.cursor()
+            except sqlite3.Error as e:
+                print(e)
+                raise Exception('Cursor cannot be created.')
+            
+        drop_table_sql = 'DROP TABLE IF EXISTS ' + \
+            self.design_table_name + ';'
+        create_table_sql = 'CREATE TABLE IF NOT EXISTS ' + \
+            self.design_table_name + ' ( ' + \
+            'id INTEGER NOT NULL PRIMARY KEY'
+        for k in self.design_list.keys():
+            create_table_sql += ', ' + k + ' ' + self.design_list[k] + '  NOT NULL DEFAULT 0.0'
+        for k in self.param_list.keys():
+            create_table_sql += ', ' + k + ' ' + self.param_list[k] + '  NOT NULL DEFAULT 0.0'
+        create_table_sql += ' );'
+        
+        # Get cursur, drop existing table, and create new table
+        try:
+            self.cursor.execute(drop_table_sql)
+            self.cursor.execute(create_table_sql)
+        except sqlite3.Error as e:
+            print(e)
+    
+    def add_data(self, design, param):
+        
+        if self.conn == None:
+            self.create_connection()
+            self.create_table()
+        
+        design_list_keys = list(self.design_list.keys())
+        param_list_keys = list(self.param_list.keys())
+        
+        sql = 'INSERT INTO ' + self.design_table_name + '('
+        for idx in range(len(design_list_keys)):
+            sql += design_list_keys[idx]
+            sql += ','
+        for idx in range(len(param_list_keys)):
+            sql += param_list_keys[idx]
+            if idx != len(param_list_keys) - 1:
+                sql += ','
+        sql += ') VALUES('
+        for idx in range(len(design_list_keys)):
+            sql += '?'
+            sql += ','
+        for idx in range(len(param_list_keys)):
+            sql += '?'
+            if idx != len(param_list_keys) - 1:
+                sql += ','
+        sql += ');'
+        
+        val = []
+        for idx in range(len(design_list_keys)):
+            val.append(design[design_list_keys[idx]])
+        for idx in range(len(param_list_keys)):
+            val.append(param[param_list_keys[idx]])
+            
+        try:
+            self.cursor.execute(sql, tuple(val))
+        except sqlite3.Error as e:
+            print(e)
+            
+    def get_design_id(self):
+        
+        if self.conn == None:
+            return []
+        
+        if self.cursor == None:
+            try:
+                self.cursor = self.conn.cursor()
+            except sqlite3.Error as e:
+                print(e)
+                return []
+        
+        sql = 'SELECT id FROM ' + self.design_table_name + ' ORDER BY id ASC;'
+        
+        try:
+            self.cursor.execute(sql)
+            cout = self.cursor.fetchall()
+            out = [i[0] for i in cout]
+        except sqlite3.Error as e:
+            print(e)
+            out = []
+            
+        return out
+    
+    def get_design_dict(self, id_num):
+        
+        if self.conn == None:
+            raise Exception('DB connection lost.')
+        
+        if self.cursor == None:
+            try:
+                self.cursor = self.conn.cursor()
+            except sqlite3.Error as e:
+                print(e)
+                raise Exception('DB cursor lost.')
+        
+        sql = 'SELECT * FROM ' + self.design_table_name + ' WHERE id=' + '{:d}'.format(id_num) + ';'
+        
+        try:
+            self.cursor.execute(sql)
+            cout = self.cursor.fetchall()
+        except sqlite3.Error as e:
+            print(e)
+            return None
+        
+        if len(cout) != 1:
+            raise Exception('Number of design for specified id is not 1.')
+        
+        out = cout[0]
+        design_list_keys = list(self.design_list.keys())
+        param_list_keys = list(self.param_list.keys())
+        
+        design = {}
+        param = {}
+        for idx in range(len(design_list_keys)):
+            design[design_list_keys[idx]] = out[idx + 1]
+        for idx in range(len(param_list_keys)):
+            param[param_list_keys[idx]] = out[len(design_list_keys) + idx + 1]
+        
+        return design, param
+
+
 if __name__ == '__main__':
     
-    COMPUTE = 2 # 0: None, 1: Cost only, 2: Full model
+    COMPUTE = 0 # 0: None, 1: Cost only, 2: Full model
     
-    a = turbine_design()
-    a.design = {
+    # Create DB for design point management
+    d = sql_design(dbpath = 'temp/linear_data.db')
+    
+    # Add DP#1
+    design = {
         'hub_height': 150.0,
         'tower_top_diameter': 6.5,
         'tower_bottom_thickness': 0.041058,
         'tower_top_thickness': 0.020826,
         'rotor_diameter': 240.0
     }
-    a.create_turbine()
-    a.visualize_turbine()
+    param = {
+        'tower_div': 11,
+        'tower_bottom_height': 15.0,
+        'tower_bottom_diameter': 10.0,
+        'tower_yaw_thickness': 0.023998,
+        'monopile_bottom_height': -75.0,
+        'water_depth': 30.0
+    }
+    d.add_data(design, param)
     
-    if COMPUTE == 0:
-        pass
+    # Add DP#2
+    design = {
+        'hub_height': 155.0,
+        'tower_top_diameter': 6.5,
+        'tower_bottom_thickness': 0.041058,
+        'tower_top_thickness': 0.020826,
+        'rotor_diameter': 250.0
+    }
+    param = {
+        'tower_div': 11,
+        'tower_bottom_height': 15.0,
+        'tower_bottom_diameter': 10.0,
+        'tower_yaw_thickness': 0.023998,
+        'monopile_bottom_height': -75.0,
+        'water_depth': 30.0
+    }
+    d.add_data(design, param)
     
-    elif COMPUTE == 1:
-        a.compute_cost_only()
-        AEP = a.result.get_val("rotorse.rp.AEP", units="MW*h")[0]
-        LCOE = a.result.get_val('financese.lcoe', units='USD/(MW*h)')[0]
-        COST = LCOE*AEP
-        print('Estimated yearly cost: {:} USD/year'.format(COST))
-        print('over design lifetime of: {:} years'.format(a.turbine_model['assembly']['lifetime']))
+    # Get the list of DPs in the DB
+    id_list = d.get_design_id()
+    
+    # Evaluate DPs
+    for idx in id_list:
+        des, par = d.get_design_dict(idx)
         
-    elif COMPUTE == 2:
-        a.compute_full_model()
-        AEP = a.result.get_val("rotorse.rp.AEP", units="MW*h")[0]
-        LCOE = a.result.get_val('financese.lcoe', units='USD/(MW*h)')[0]
-        COST = LCOE*AEP
-        print('Estimated yearly cost: {:} USD/year'.format(COST))
-        print('over design lifetime of: {:} years'.format(a.turbine_model['assembly']['lifetime']))
+        a = turbine_design()
+        a.design_SN = idx
+        a.design = des
+        a.param = par
+        a.create_turbine()
+        a.visualize_turbine()
         
-
+        if COMPUTE == 0:
+            pass
+        
+        elif COMPUTE == 1:
+            a.compute_cost_only()
+            AEP = a.result.get_val("rotorse.rp.AEP", units="MW*h")[0]
+            LCOE = a.result.get_val('financese.lcoe', units='USD/(MW*h)')[0]
+            COST = LCOE*AEP
+            print('Estimated yearly cost: {:} USD/year'.format(COST))
+            print('over design lifetime of: {:} years'.format(a.turbine_model['assembly']['lifetime']))
+            
+        elif COMPUTE == 2:
+            a.compute_full_model()
+            AEP = a.result.get_val("rotorse.rp.AEP", units="MW*h")[0]
+            LCOE = a.result.get_val('financese.lcoe', units='USD/(MW*h)')[0]
+            COST = LCOE*AEP
+            print('Estimated yearly cost: {:} USD/year'.format(COST))
+            print('over design lifetime of: {:} years'.format(a.turbine_model['assembly']['lifetime']))
+            
 
 
 
