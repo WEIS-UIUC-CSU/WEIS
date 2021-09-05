@@ -253,6 +253,8 @@ class turbine_design:
         wt_opt = myopt.set_initial(wt_opt, turbine_model)
         wt_opt.run_model()
         
+        self.modeling_options = modeling_options
+        self.analysis_options = analysis_options
         self.result = wt_opt
     
     def compute_full_model(self):
@@ -674,8 +676,7 @@ if __name__ == '__main__':
             print('Estimated yearly cost: {:} USD/year'.format(COST))
             print('over design lifetime of: {:} years'.format(a.turbine_model['assembly']['lifetime']))
             
-
-
-
+    d.cursor.close()
+    d.conn.close()
 
 
