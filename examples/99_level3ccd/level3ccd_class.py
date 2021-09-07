@@ -11,6 +11,7 @@ from wisdem.glue_code.gc_WT_InitModel       import yaml2openmdao
 from weis.glue_code.gc_PoseOptimization     import PoseOptimizationWEIS
 from weis.glue_code.glue_code               import WindPark
 from weis.glue_code.gc_ROSCOInputs          import assign_ROSCO_values
+from weis.control.LinearModel               import LinearTurbineModel
 #from weis.aeroelasticse.FAST_reader         import InputReader_OpenFAST
 #from wisdem.commonse                        import fileIO
 from wisdem.glue_code.gc_PoseOptimization   import PoseOptimization as PoseOptimizationWISDEM
@@ -45,11 +46,48 @@ class turbine_design:
         self.turbine_model = turbine_model
         self.modeling_options = modeling_options
         self.analysis_options = analysis_options
+        
+        self.keep_States = 'All'
+        self.remove_States = [
+            'ED Variable speed generator DOF (internal DOF index = DOF_GeAz), rad',
+        ]
+        self.keep_CntrlInpt = [
+            'IfW Extended input: horizontal wind speed (steady/uniform wind), m/s',
+            'ED Generator torque, Nm',
+            'ED Extended input: collective blade-pitch command, rad'
+        ]
+        self.remove_CntrlInpt = 'None'
+        self.keep_Output = [
+            'IfW Wind1VelX, (m/s)',     # 0   X component of wind
+            'SrvD GenPwr, (kW)',        # 3   Electrical generator power
+            'SrvD GenTq, (kN-m)',       # 4   Electrical generator torque
+            'ED GenSpeed, (rpm)',       # 9   Angular speed of the high-speed shaft and generator
+            'ED RotSpeed, (rpm)',       # 64  Rotor azimuth angular speed
+            'ED RotThrust, (kN)',       # 65  Low-speed shaft thrust force = rotor thrust force
+            'ED RotTorq, (kN-m)',       # 66  Low-speed shaft torque = rotor torque
+            'ED TwrBsFxt, (kN)',        # 220 Tower base fore-aft shear force
+            'ED TwrBsFyt, (kN)',        # 221 Tower base side-to-side shear force
+            'ED TwrBsFzt, (kN)',        # 222 Tower base axial force
+            'ED TwrBsMxt, (kN-m)',      # 223 Tower base roll (or side-to-side) moment
+            'ED TwrBsMyt, (kN-m)',      # 224 Tower base pitching (or fore-aft) moment
+            'ED TwrBsMzt, (kN-m)',      # 225 Tower base yaw (or torsional) moment
+            'ED YawBrFxp, (kN)',        # 226 Tower-top / yaw bearing fore-aft (nonrotating) shear force
+            'ED YawBrFyp, (kN)',        # 227 Tower-top / yaw bearing side-to-side (nonrotating) shear force
+            'ED YawBrFzp, (kN)',        # 228 Tower-top / yaw bearing axial force
+            'ED YawBrMxp, (kN-m)',      # 229 Nonrotating tower-top / yaw bearing roll moment
+            'ED YawBrMyp, (kN-m)',      # 230 Nonrotating tower-top / yaw bearing pitch moment
+            'ED YawBrMzp, (kN-m)',      # 231 Tower-top / yaw bearing yaw moment
+        ]
+        self.remove_Output = 'None'
 
         self.design = dict()
         self.param = dict()
         self.design_SN = 0
         self.result = None
+        self.LinearTurbine = None
+        self.linear = dict()
+        self.cost_per_year = 0.0
+        self.design_life_year = 0.0
 
         # Store reference turbine values
         self._ref_tower_grd = self.turbine_model['components']['tower']['outer_shape_bem']['reference_axis']['z']['grid']
@@ -256,6 +294,11 @@ class turbine_design:
         self.modeling_options = modeling_options
         self.analysis_options = analysis_options
         self.result = wt_opt
+        LCOE = wt_opt.get_val('financese.lcoe', units='USD/(MW*h)')[0]
+        AEP = wt_opt.get_val("rotorse.rp.AEP", units="MW*h")[0]
+        self.cost_per_year = LCOE*AEP
+        self.design_life_year = self.turbine_model['assembly']['lifetime']
+        
     
     def compute_full_model(self):
         
@@ -292,9 +335,190 @@ class turbine_design:
         wt_opt = myopt.set_initial(wt_opt, turbine_model)
         wt_opt.run_model()
         
+        FAST_runDirectory = wt_opt.model.aeroelastic.FAST_runDirectory
+        lin_case_name = wt_opt.model.aeroelastic.lin_case_name
+        NLinTimes = modeling_options['Level2']['linearization']['NLinTimes']
+        LinearTurbine = LinearTurbineModel(
+            lin_file_dir=FAST_runDirectory,
+            lin_file_names=lin_case_name,
+            nlin=NLinTimes,
+            remove_azimuth=False
+        )
+        
+        linear_in = {
+            'A'             : LinearTurbine.A_ops,
+            'B'             : LinearTurbine.B_ops,
+            'C'             : LinearTurbine.C_ops,
+            'D'             : LinearTurbine.D_ops,
+            'x_ops'         : LinearTurbine.x_ops,
+            'u_ops'         : LinearTurbine.u_ops,
+            'y_ops'         : LinearTurbine.y_ops,
+            'DescStates'    : LinearTurbine.DescStates,
+            'DescCntrlInpt' : LinearTurbine.DescCntrlInpt,
+            'DescOutput'    : LinearTurbine.DescOutput,
+            'omega_rpm'     : LinearTurbine.omega_rpm,
+            'u_h'           : LinearTurbine.u_h,
+            'ind_fast_inps' : LinearTurbine.ind_fast_inps,
+            'ind_fast_outs' : LinearTurbine.ind_fast_outs,
+        }
+        linear_out = self.reduce_linear_model(linear_in)
+        
         self.modeling_options = modeling_options
         self.analysis_options = analysis_options
         self.result = wt_opt
+        self.LinearTurbine = LinearTurbine
+        self.linear = linear_out
+        LCOE = wt_opt.get_val('financese.lcoe', units='USD/(MW*h)')[0]
+        AEP = wt_opt.get_val("rotorse.rp.AEP", units="MW*h")[0]
+        self.cost_per_year = LCOE*AEP
+        self.design_life_year = self.turbine_model['assembly']['lifetime']
+        
+        
+    def reduce_linear_model(self, linear):
+        
+        A = linear['A']
+        B = linear['B']
+        C = linear['C']
+        D = linear['D']
+        x_ops = linear['x_ops']
+        u_ops = linear['u_ops']
+        y_ops = linear['y_ops']
+        DescStates = linear['DescStates']
+        DescCntrlInpt = linear['DescCntrlInpt']
+        DescOutput = linear['DescOutput']
+        omega_rpm = linear['omega_rpm']
+        u_h = linear['u_h']
+        ind_fast_inps = linear['ind_fast_inps']
+        ind_fast_outs = linear['ind_fast_outs']
+        
+        # Process keep_States
+        if type(self.keep_States) == str:
+            if self.keep_States.lower() != 'all':
+                raise ValueError('keep_States should be either list or \'all\'')
+            else:
+                idx_States = list(range(0, len(DescStates)))
+        elif type(self.keep_States) == list:
+            if len(self.keep_States) == 0:
+                raise ValueError('keep_States list should include at least one item')
+            else:
+                idx_States = [
+                    DescStates.index(s) for s in self.keep_States
+                ]
+        else:
+            raise ValueError('keep_States should be either list or \'all\'')
+        
+        # Process remove_States
+        if type(self.remove_States) == str:
+            if self.remove_States.lower() != 'none':
+                raise ValueError('remove_States should be either list or \'none\'')
+            else:
+                idx_remove_States = []
+        elif type(self.remove_States) == list:
+            idx_remove_States = [
+                DescStates.index(s) for s in self.remove_States
+            ]
+        else:
+            raise ValueError('remove_States should be either list or \'none\'')
+        idx_States = np.delete(idx_States, idx_remove_States).tolist()
+        
+        # Process keep_CntrlInpt
+        if type(self.keep_CntrlInpt) == str:
+            if self.keep_CntrlInpt.lower() != 'all':
+                raise ValueError('keep_CntrlInpt should be either list or \'all\'')
+            else:
+                idx_CntrlInpt = list(range(0, len(DescCntrlInpt)))
+        elif type(self.keep_CntrlInpt) == list:
+            if len(self.keep_CntrlInpt) == 0:
+                raise ValueError('keep_CntrlInpt list should include at least one item')
+            else:
+                idx_CntrlInpt = [
+                    DescCntrlInpt.index(s) for s in self.keep_CntrlInpt
+                ]
+        else:
+            raise ValueError('keep_CntrlInpt should be either list or \'all\'')
+        
+        # Process remove_CntrlInpt
+        if type(self.remove_CntrlInpt) == str:
+            if self.remove_CntrlInpt.lower() != 'none':
+                raise ValueError('remove_CntrlInpt should be either list or \'none\'')
+            else:
+                idx_remove_CntrlInpt = []
+        elif type(self.remove_CntrlInpt) == list:
+            idx_remove_CntrlInpt = [
+                DescCntrlInpt.index(s) for s in self.remove_CntrlInpt
+            ]
+        else:
+            raise ValueError('remove_CntrlInpt should be either list or \'none\'')
+        idx_CntrlInpt = np.delete(idx_CntrlInpt, idx_remove_CntrlInpt).tolist()
+        
+        # Process keep_Output
+        if type(self.keep_Output) == str:
+            if self.keep_Output.lower() != 'all':
+                raise ValueError('keep_Output should be either list or \'all\'')
+            else:
+                idx_Output = list(range(0, len(DescOutput)))
+        elif type(self.keep_Output) == list:
+            if len(self.keep_Output) == 0:
+                raise ValueError('keep_Output list should include at least one item')
+            else:
+                idx_Output = [
+                    DescOutput.index(s) for s in self.keep_Output
+                ]
+        else:
+            raise ValueError('keep_Output should be either list or \'all\'')
+        
+        # Process remove_Output
+        if type(self.remove_Output) == str:
+            if self.remove_Output.lower() != 'none':
+                raise ValueError('remove_Output should be either list or \'none\'')
+            else:
+                idx_remove_Output = []
+        elif type(self.remove_Output) == list:
+            idx_remove_Output = [
+                DescOutput.index(s) for s in self.remove_Output
+            ]
+        else:
+            raise ValueError('remove_Output should be either list or \'none\'')
+        idx_Output = np.delete(idx_Output, idx_remove_Output).tolist()
+        
+        Ar = A[idx_States,:,:][:,idx_States,:].tolist()
+        Br = B[idx_States,:,:][:,idx_CntrlInpt,:].tolist()
+        Cr = C[idx_Output,:,:][:,idx_States,:].tolist()
+        Dr = D[idx_Output,:,:][:,idx_CntrlInpt,:].tolist()
+        
+        x_ops_r = x_ops[idx_States,:].tolist()
+        u_ops_r = u_ops[idx_CntrlInpt,:].tolist()
+        y_ops_r = y_ops[idx_Output,:].tolist()
+        
+        DescStates_r = [DescStates[i] for i in idx_States]
+        DescCntrlInpt_r = [DescCntrlInpt[i] for i in idx_CntrlInpt]
+        DescOutput_r = [DescOutput[i] for i in idx_Output]
+        
+        omega_rpm_r = np.mean(omega_rpm, axis=0).tolist()
+        u_h_r = u_h.tolist()
+        
+        ind_fast_inps_r = ind_fast_inps[idx_CntrlInpt].tolist()
+        ind_fast_outs_r = ind_fast_outs[idx_Output].tolist()
+        
+        # Return results
+        linear_out = {
+            'A'             : Ar,
+            'B'             : Br,
+            'C'             : Cr,
+            'D'             : Dr,
+            'x_ops'         : x_ops_r,
+            'u_ops'         : u_ops_r,
+            'y_ops'         : y_ops_r,
+            'DescStates'    : DescStates_r,
+            'DescCntrlInpt' : DescCntrlInpt_r,
+            'DescOutput'    : DescOutput_r,
+            'omega_rpm'     : omega_rpm_r,
+            'u_h'           : u_h_r,
+            'ind_fast_inps' : ind_fast_inps_r,
+            'ind_fast_outs' : ind_fast_outs_r,
+        }
+        return linear_out
+    
 
     def visualize_turbine(self):
 
@@ -678,5 +902,3 @@ if __name__ == '__main__':
             
     d.cursor.close()
     d.conn.close()
-
-
