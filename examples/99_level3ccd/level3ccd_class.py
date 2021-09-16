@@ -17,9 +17,14 @@ from weis.control.LinearModel               import LinearTurbineModel
 from wisdem.glue_code.gc_PoseOptimization   import PoseOptimization as PoseOptimizationWISDEM
 
 from scipy.interpolate                      import interp1d
+from scipy.special                          import comb
+from scipy.optimize                         import minimize, approx_fprime
 from matplotlib                             import pyplot as plt
 from matplotlib.patches                     import (Rectangle, Circle)
 from copy                                   import deepcopy
+from smt.sampling_methods                   import LHS
+from pyDOE2                                 import lhs
+
 
 
 class turbine_design:
@@ -818,6 +823,222 @@ class sql_design:
             param[param_list_keys[idx]] = out[len(design_list_keys) + idx + 1]
         
         return design, param
+    
+    
+class MaxProESE(LHS):
+    
+    def __init__(self, **kwargs):
+        
+        kwargs['criterion'] = 'ese'
+        super(MaxProESE, self).__init__(**kwargs)
+        
+        
+    def pdiff(self, X):
+        
+        X = np.array(X)
+        
+        n, m = X.shape
+        out = np.zeros(shape=((n*(n-1))//2, m), dtype=float)
+        
+        kdx = 0
+        for idx in range(0, n-1):
+            for jdx in range(idx+1, n):
+                out[kdx, :] = X[idx, :] - X[jdx, :]
+                kdx += 1
+                
+        return out
+    
+    
+    def cdiff(self, XA, XB):
+        
+        XA = np.array(XA)
+        XB = np.array(XB)
+        
+        nA, mA = XA.shape
+        nB, mB = XB.shape
+        out = np.zeros(shape=(nA, nB, mA), dtype=float)
+        
+        for idx in range(0, nA):
+            for jdx in range(0, nB):
+                out[idx, jdx, :] = XB[jdx, :] - XA[idx, :]
+                
+        return out
+    
+    
+    def _PhiP(self, X, p=10):
+        
+        return (1.0/np.prod(self.pdiff(X)**2.0, axis=1)).sum()/comb(X.shape[0],2)
+    
+    
+    def _PhiP_exchange(self, X, k, PhiP_, p, fixed_index):
+        
+        # Choose two (different) random rows to perform the exchange
+        i1 = self.random_state.randint(X.shape[0])
+        while i1 in fixed_index:
+            i1 = self.random_state.randint(X.shape[0])
+
+        i2 = self.random_state.randint(X.shape[0])
+        while i2 == i1 or i2 in fixed_index:
+            i2 = self.random_state.randint(X.shape[0])
+
+        X_ = np.delete(X, [i1, i2], axis=0)
+
+        diff1 = np.squeeze(self.cdiff([X[i1, :]], X_))
+        diff2 = np.squeeze(self.cdiff([X[i2, :]], X_))
+        
+        Xi1 = deepcopy(X[i1, :])
+        Xi2 = deepcopy(X[i2, :])
+        Xi1[k] = X[i2, k]
+        Xi2[k] = X[i1, k]
+        
+        diffR1 = np.squeeze(self.cdiff([Xi1], X_))
+        diffR2 = np.squeeze(self.cdiff([Xi2], X_))
+        
+        res = (
+            PhiP_*comb(X.shape[0],2) \
+                - (1.0/np.prod(diff1**2, axis=1)).sum() \
+                - (1.0/np.prod(diff2**2, axis=1)).sum() \
+                + (1.0/np.prod(diffR1**2, axis=1)).sum() \
+                + (1.0/np.prod(diffR2**2, axis=1)).sum()
+        )/comb(X.shape[0],2)
+        
+        X[i1, :] = Xi1
+        X[i2, :] = Xi2
+
+        return res
+
+
+class surrogate_model:
+    
+    def __init__(self):
+        
+        self._n_dim_x = 0
+        self._n_dim_f = 0
+        self._x_train = None
+        self._f_train = None
+        
+        
+    def add_train_pts(self, x_train, f_train):
+        
+        x_train = np.array(x_train)
+        f_train = np.array(f_train)
+        
+        if x_train.shape[0] != f_train.shape[0]:
+            raise ValueError('number of training points do not match between x and f.')
+        
+        if self._n_dim_x == 0:
+            self._n_dim_x = x_train.shape[1]
+        else:
+            if self._n_dim_x != x_train.shape[1]:
+                raise ValueError('x dimension of training points does not match to the dimension of existing points.')
+        
+        if self._n_dim_f == 0:
+            self._n_dim_f = f_train.shape[1]
+        else:
+            if self._n_dim_f != f_train.shape[1]:
+                raise ValueError('f dimension of training points does not match to the dimension of existing points.')
+        
+        if self._x_train == None:
+            self._x_train = np.zeros(shape=(0, self._n_dim_x), dtype=float)
+            
+        if self._f_train == None:
+            self._f_train = np.zeros(shape=(0, self._n_dim_f), dtype=float)
+            
+        if self._x_train.shape[0] != self._f_train.shape[0]:
+            raise Exception('number of existing points do not match between x and f.')
+            
+        self._x_train = np.append(
+            self._x_train,
+            x_train,
+            axis = 0
+        )
+        
+        self._f_train = np.append(
+            self._f_train,
+            f_train,
+            axis = 0
+        )
+    
+    
+    def sampling(self, nt, xlimits, criterion='maxpro', random_state=0, extreme=True):
+        
+        dim = xlimits.shape[0]
+        
+        if extreme:
+            xe = np.array(
+                np.meshgrid(
+                    *[xlimits[i,:].tolist() for i in range(dim)]
+                )
+            ).T.reshape(-1, dim)
+            
+            ne = xe.shape[0]
+            if nt > 2*ne:
+                ns = nt - ne
+            else:
+                ns = int(np.ceil(nt/2.0))
+        else:
+            xe = np.zeros(shape=(0, dim), dtype=float)
+            ns = nt
+        
+        if self.sampling_model == None:
+            if criterion == 'maxpro':
+                self.sampling_model = MaxProESE(
+                    xlimits = xlimits,
+                    random_state = random_state
+                )
+            elif criterion == 'ese':
+                self.sampling_model = LHS(
+                    xlimits = xlimits,
+                    criterion='ese',
+                    random_state = random_state
+                )
+
+
+class optimization_problem:
+
+    def __init__(self):
+        self.num_diff_eps = 1.0e-4
+        self.constraint_function_list = []
+
+    def objective(self, x):
+        return 0.0
+
+    def gradient(self, x):
+        return approx_fprime(x, self.objective, self.num_diff_eps)
+
+    def constraints(self, x):
+        if len(self.constraint_function_list) == 0:
+            return np.array([], dtype=float)
+        else:
+            out = []
+            for fn in self.constraint_function_list:
+                out.append(np.array(fn(x)))
+
+    def jacobian(self, x):
+        if len(self.constraint_function_list) == 0:
+            return np.array([], dtype=float)
+        else:
+            out = []
+            for fn in self.constraint_function_list:
+                out.append(approx_fprime(x, fn, self.num_diff_eps))
+            return np.concatenate(out)
+
+    def hessian(self, x):
+        h = self.num_diff_eps
+        n = x.shape[0]
+        fzero = approx_fprime(x, self.objective, self.num_diff_eps)
+        row, col = np.nonzero(np.tril(np.ones(shape=(n, n))))
+        hess = np.zeros(shape=(n,n), dtype=float)
+        for idx in range(n):
+            xplus = deepcopy(x)
+            xplus[idx] += h
+            fplus = approx_fprime(xplus, self.objective, self.num_diff_eps)
+            hess[idx, :] = (fplus - fzero)/h
+        return hess[row, col]
+
+
+
+
 
 
 if __name__ == '__main__':
