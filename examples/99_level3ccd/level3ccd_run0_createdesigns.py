@@ -56,13 +56,5 @@ total_design_id_list = d.get_design_id()
 d.cursor.close()
 d.conn.close()
 
-processes = set()
-
-for id_val in total_design_id_list:
-    processes.add(subprocess.Popen(['python', 'level3ccd_designeval.py', dbpath, str(id_val)]))
-    if len(processes) >= max_cores:
-        os.wait()
-        processes.difference_update([p for p in processes if p.poll() is not None])
-
 end_time = time.time()
 print('Time elapsed = {:} seconds'.format(end_time - start_time))

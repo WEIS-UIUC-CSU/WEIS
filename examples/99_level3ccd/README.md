@@ -15,7 +15,8 @@ Optionally, IPOPT included in the pyoptsparse can be installed and used with dym
 ## Usage
 
 ```
-python level3ccd_run0_evaldesigns.py -np 16
-python level3ccd_run1_construct.py
-python level3ccd_run2_optimization.py
+python level3ccd_run0_createdesigns.py
+python level3ccd_run1_evaldesigns.py -np 16
+python level3ccd_run2_construct.py
+python level3ccd_run3_optimization.py
 ```
