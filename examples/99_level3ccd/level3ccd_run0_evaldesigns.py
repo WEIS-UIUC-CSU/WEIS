@@ -70,7 +70,7 @@ else:
 for id_val in id_list_scattered:
     subprocess.run([
         'python',
-        'level3ccd_designeval',
+        'level3ccd_designeval.py',
         dbpath,
         str(id_val)
     ])
