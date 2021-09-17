@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 start_time = time.time()
 import numpy as np
@@ -8,7 +9,7 @@ from level3ccd_class import (sql_design, surrogate_model)
 # Define design problem
 
 N = 200                 # number of sample points
-max_cores = 4
+max_cores = 1
 random_state = 0
 xlimits = np.array([
     [140.0, 160.0],     # hub_height
@@ -28,6 +29,10 @@ param = {
 dbpath = 'temp/linear_data.db'
 
 # Begin DFSM script
+
+if len(sys.argv) > 1:
+    if sys.argv[1].lower() == '-np':
+        max_cores = int(sys.argv[2])
 
 sm = surrogate_model()
 x_smp = sm.sampling(N, xlimits, criterion='ese', random_state=random_state, extreme=True)
