@@ -1,6 +1,6 @@
 import os
-import sys
-import pickle
+#import sys
+#import pickle
 import numpy as np
 import openmdao.api as om
 import weis
@@ -17,15 +17,14 @@ from weis.control.LinearModel               import LinearTurbineModel
 from wisdem.glue_code.gc_PoseOptimization   import PoseOptimization as PoseOptimizationWISDEM
 
 from scipy.interpolate                      import interp1d
-from scipy.special                          import comb
+#from scipy.special                          import comb
 from scipy.optimize                         import minimize, approx_fprime
-from numpy.matlib                           import repmat
+#from numpy.matlib                           import repmat
 from matplotlib                             import pyplot as plt
 from matplotlib.patches                     import (Rectangle, Circle)
 from copy                                   import deepcopy
 from smt.sampling_methods                   import LHS
-from pyDOE2                                 import lhs
-
+#from pyDOE2                                 import lhs
 
 
 class turbine_design:
@@ -304,8 +303,7 @@ class turbine_design:
         AEP = wt_opt.get_val("rotorse.rp.AEP", units="MW*h")[0]
         self.cost_per_year = LCOE*AEP
         self.design_life_year = self.turbine_model['assembly']['lifetime']
-        
-    
+
     def compute_full_model(self):
         
         turbine_model = deepcopy(self.turbine_model)
@@ -378,8 +376,7 @@ class turbine_design:
         AEP = wt_opt.get_val("rotorse.rp.AEP", units="MW*h")[0]
         self.cost_per_year = LCOE*AEP
         self.design_life_year = self.turbine_model['assembly']['lifetime']
-        
-        
+
     def reduce_linear_model(self, linear):
         
         A = linear['A']
@@ -524,7 +521,6 @@ class turbine_design:
             'ind_fast_outs' : ind_fast_outs_r,
         }
         return linear_out
-    
 
     def visualize_turbine(self):
 
@@ -627,6 +623,7 @@ class turbine_design:
         fgs.tight_layout()
         fgs.show()
 
+
 class sql_design:
     
     def __init__(self, **kwargs):
@@ -677,16 +674,14 @@ class sql_design:
             self.cursor = self.conn.cursor()
         else:
             self.cursor = None
-            
-            
+
     def remove_db(self):
         if os.path.isfile(self.dbpath):
             try:
                 os.remove(self.dbpath)
             except OSError:
                 print('DB file cannot be removed.')
-        
-        
+
     def close_connection(self):
         
         if self.cursor:
@@ -694,8 +689,7 @@ class sql_design:
         
         if self.conn:
             self.conn.close()
-        
-        
+
     def create_table(self):
         
         if self.conn == None:
@@ -834,8 +828,9 @@ class surrogate_model:
         self._n_dim_f = 0
         self._x_train = None
         self._f_train = None
-        
-        
+        self.sampling_model = None
+        self._x_sampling = None
+
     def add_train_pts(self, x_train, f_train):
         
         x_train = np.array(x_train)
@@ -876,13 +871,12 @@ class surrogate_model:
             f_train,
             axis = 0
         )
-    
-    
-    def sampling(self, nt, xlimits, criterion='maxpro', random_state=0, extreme=True):
+
+    def sampling(self, nt, xlimits, criterion='ese', random_state=0, extreme=True):
         
         dim = xlimits.shape[0]
         
-        if extreme:
+        if (type(self.sampling_model) != LHS) and extreme:
             xe = np.array(
                 np.meshgrid(
                     *[xlimits[i,:].tolist() for i in range(dim)]
@@ -890,26 +884,43 @@ class surrogate_model:
             ).T.reshape(-1, dim)
             
             ne = xe.shape[0]
-            if nt > 2*ne:
+            if nt > 3*ne:
                 ns = nt - ne
             else:
-                ns = int(np.ceil(nt/2.0))
+                ns = int(np.ceil(nt*2.0/3.0))
         else:
             xe = np.zeros(shape=(0, dim), dtype=float)
             ns = nt
         
-        if self.sampling_model == None:
-            if criterion == 'maxpro':
-                self.sampling_model = MaxProESE(
-                    xlimits = xlimits,
-                    random_state = random_state
-                )
-            elif criterion == 'ese':
+        if type(self.sampling_model) != LHS:
+            if criterion.lower() not in ['center', 'maximin', 'centermaximin', 'correlation', 'c', 'm', 'cm', 'corr', 'ese']:
                 self.sampling_model = LHS(
                     xlimits = xlimits,
                     criterion='ese',
                     random_state = random_state
                 )
+            else:
+                self.sampling_model = LHS(
+                    xlimits = xlimits,
+                    criterion=criterion.lower(),
+                    random_state = random_state
+                )
+            xs = self.sampling_model(ns)
+            self._x_sampling = np.append(xe, xs, axis=0)
+            return self._x_sampling
+        else:
+            return self._x_sampling
+
+    def split_list_chunks(self, fulllist, max_n_chunk=1, item_count=None):
+        item_count = item_count or len(fulllist)
+        n_chunks = min(item_count, max_n_chunk)
+        fulllist = iter(fulllist)
+        floor = item_count // n_chunks
+        ceiling = floor + 1
+        stepdown = item_count % n_chunks
+        for x_i in range(n_chunks):
+            length = ceiling if x_i < stepdown else floor
+            yield [next(fulllist) for _ in range(length)]
 
 
 class optimization_problem:
@@ -953,10 +964,6 @@ class optimization_problem:
             fplus = approx_fprime(xplus, self.objective, self.num_diff_eps)
             hess[idx, :] = (fplus - fzero)/h
         return hess[row, col]
-
-
-
-
 
 
 if __name__ == '__main__':
