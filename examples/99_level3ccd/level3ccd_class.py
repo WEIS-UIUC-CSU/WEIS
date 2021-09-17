@@ -304,7 +304,7 @@ class turbine_design:
         self.cost_per_year = LCOE*AEP
         self.design_life_year = self.turbine_model['assembly']['lifetime']
 
-    def compute_full_model(self):
+    def compute_full_model(self, OF_run_dir=None):
         
         turbine_model = deepcopy(self.turbine_model)
         modeling_options = deepcopy(self.modeling_options)
@@ -318,6 +318,8 @@ class turbine_design:
         
         modeling_options['General']['openfast_configuration']['mpi_run'] = False
         modeling_options['General']['openfast_configuration']['cores']   = 1
+        if OF_run_dir:
+            modeling_options['General']['openfast_configuration']['OF_run_dir'] = OF_run_dir
         modeling_options['General']['openfast_configuration']['OF_run_dir'] \
             = os.path.join(
                 modeling_options['General']['openfast_configuration']['OF_run_dir'],

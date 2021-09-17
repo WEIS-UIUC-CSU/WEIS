@@ -13,9 +13,7 @@ from level3ccd_class import turbine_design
 from level3ccd_class import sql_design
 
 if len(sys.argv) != 3:
-    dbpath = '/Users/yonghoonlee/Dropbox/ATLANTIS_WEIS/WEIS/examples/99_level3ccd/temp/linear_data.db'
-    idnum = 1
-    #raise ValueError('Wrong number of arguments. Usage: python level3ccd_designeval.py DB_PATH ID_NUM')
+    raise ValueError('Wrong number of arguments. Usage: python level3ccd_designeval.py DB_PATH ID_NUM')
 else:
     dbpath = sys.argv[1]
     idnum = int(sys.argv[2])
@@ -32,7 +30,7 @@ wt.param = par
 wt.create_turbine()
 #wt.visualize_turbine()
 #wt.compute_cost_only()
-wt.compute_full_model()
+wt.compute_full_model(OF_run_dir=os.path.join(os.path.dirname(dbpath), 'OF_lin'))
 
 wt_linear_result = wt.linear
 wt_linear_result['cost_per_year'] = float(wt.cost_per_year)

@@ -8,15 +8,15 @@ from level3ccd_class import (sql_design, surrogate_model)
 
 # Define design problem
 
-N = 200                 # number of sample points
+N = 100                 # number of sample points
 max_cores = 1
 random_state = 0
 xlimits = np.array([
-    [140.0, 160.0],     # hub_height
-    [5.8, 7.2],         # tower_top_diameter
-    [0.03, 0.05],       # tower_bottom_thickness
+    [145.0, 155.0],     # hub_height
+    [5.9, 7.1],         # tower_top_diameter
+    [0.035, 0.45],       # tower_bottom_thickness
     [0.015, 0.025],     # tower_top_thickness
-    [200.0, 260.0]      # rotor_diameter
+    [230.0, 250.0]      # rotor_diameter
 ])
 param = {
     'tower_div': 11,
@@ -26,7 +26,7 @@ param = {
     'monopile_bottom_height': -75.0,
     'water_depth': 30.0
 }
-dbpath = 'temp/linear_data.db'
+dbpath = 'output/linear_data.db'
 
 # Begin DFSM script
 
