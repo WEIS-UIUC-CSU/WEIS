@@ -14,7 +14,7 @@ random_state = 0
 xlimits = np.array([
     [145.0, 155.0],     # hub_height
     [5.9, 7.1],         # tower_top_diameter
-    [0.035, 0.45],       # tower_bottom_thickness
+    [0.035, 0.045],       # tower_bottom_thickness
     [0.015, 0.025],     # tower_top_thickness
     [230.0, 250.0]      # rotor_diameter
 ])

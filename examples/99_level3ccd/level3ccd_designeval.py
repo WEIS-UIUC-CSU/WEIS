@@ -1,8 +1,10 @@
 '''
 Usage:
-    python level3ccd_designeval.py DB_PATH ID_NUM
+    python level3ccd_designeval.py DB_PATH ID_NUM [EVAL=True] [PRINT=False]
 Example:
     python level3ccd_designeval.py temp/linear_data.db 1
+    python level3ccd_designeval.py temp/linear_data.db 1 True
+    python level3ccd_designeval.py temp/linear_data.db 1 True False
 '''
 
 import os
@@ -12,11 +14,20 @@ import numpy as np
 from level3ccd_class import turbine_design
 from level3ccd_class import sql_design
 
-if len(sys.argv) != 3:
-    raise ValueError('Wrong number of arguments. Usage: python level3ccd_designeval.py DB_PATH ID_NUM')
+EVAL = True
+PRINT = False
+
+if (len(sys.argv) < 3) or (len(sys.argv) > 5):
+    raise ValueError('Wrong number of arguments. Usage: python level3ccd_designeval.py DB_PATH ID_NUM [EVAL=True] [PRINT=False]')
 else:
     dbpath = sys.argv[1]
     idnum = int(sys.argv[2])
+    if len(sys.argv) > 3:
+        if sys.argv[3].lower() == 'false':
+            EVAL = False
+    if len(sys.argv) > 4:
+        if sys.argv[4].lower() == 'true':
+            PRINT = True
 
 db = sql_design(dbpath = dbpath)
 db.create_connection()
@@ -27,6 +38,14 @@ wt = turbine_design()
 wt.design_SN = idnum
 wt.design = des
 wt.param = par
+
+if PRINT:
+    print('fixed parameter values = {:}'.format(par))
+    print('design parameter values = {:}'.format(des))
+
+if not EVAL:
+    sys.exit(os.EX_OK)
+
 wt.create_turbine()
 #wt.visualize_turbine()
 #wt.compute_cost_only()
