@@ -8,7 +8,7 @@ from level3ccd_class import (sql_design, surrogate_model)
 
 # Define design problem
 
-N = 100                 # number of sample points
+N = 200                 # number of sample points
 max_cores = 1
 random_state = 0
 xlimits = np.array([
@@ -27,12 +27,6 @@ param = {
     'water_depth': 30.0
 }
 dbpath = 'output/linear_data.db'
-
-# Begin DFSM script
-
-if len(sys.argv) > 1:
-    if sys.argv[1].lower() == '-np':
-        max_cores = int(sys.argv[2])
 
 sm = surrogate_model()
 x_smp = sm.sampling(N, xlimits, criterion='ese', random_state=random_state, extreme=True)
