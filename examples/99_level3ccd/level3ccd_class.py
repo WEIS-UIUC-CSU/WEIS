@@ -46,6 +46,7 @@ class turbine_design:
         fname_modeling = os.path.join(self.run_path, 'modeling_options.yaml')
         fname_analysis = os.path.join(self.run_path, 'analysis_options.yaml')
         self.wt_ontology = WindTurbineOntologyPythonWEIS(fname_wt_input, fname_modeling, fname_analysis)
+        self.wt_opt = None
         
         turbine_model, modeling_options, analysis_options = self.wt_ontology.get_input_data()
         self.turbine_model = turbine_model
@@ -303,8 +304,17 @@ class turbine_design:
         AEP = wt_opt.get_val("rotorse.rp.AEP", units="MW*h")[0]
         self.cost_per_year = LCOE*AEP
         self.design_life_year = self.turbine_model['assembly']['lifetime']
+        print('COST PER YEAR = {:} USD/YEAR'.format(self.cost_per_year))
+        print('DESIGN LIFE = {:} YEARS'.format(self.design_life_year))
 
     def compute_full_model(self, OF_run_dir=None):
+
+        if not self.wt_opt:
+            self.pose_wt_model(OF_run_dir)
+        self.wt_opt.run_model()
+        self.save_linear_model()
+        
+    def pose_wt_model(self, OF_run_dir=None):
         
         turbine_model = deepcopy(self.turbine_model)
         modeling_options = deepcopy(self.modeling_options)
@@ -339,11 +349,30 @@ class turbine_design:
         wt_opt = yaml2openmdao(wt_opt, modeling_options, turbine_model, analysis_options)
         wt_opt = assign_ROSCO_values(wt_opt, modeling_options, turbine_model['control'])
         wt_opt = myopt.set_initial(wt_opt, turbine_model)
-        wt_opt.run_model()
+
+        self.modeling_options = deepcopy(modeling_options)
+        self.analysis_options = deepcopy(analysis_options)
+        self.turbine_model = deepcopy(turbine_model)
+        self.wt_opt = wt_opt
+
+    def save_linear_model(self, FAST_runDirectory=None, lin_case_name=None):
         
-        FAST_runDirectory = wt_opt.model.aeroelastic.FAST_runDirectory
-        lin_case_name = wt_opt.model.aeroelastic.lin_case_name
-        NLinTimes = modeling_options['Level2']['linearization']['NLinTimes']
+        if not FAST_runDirectory:
+            FAST_runDirectory = self.wt_opt.model.aeroelastic.FAST_runDirectory
+            lin_case_name = self.wt_opt.model.aeroelastic.lin_case_name
+        else:
+            if not os.path.isdir(FAST_runDirectory):
+                raise ValueError('FAST_runDirectory = {:} does not exist'.format(FAST_runDirectory))
+            if not lin_case_name:
+                lin_case_name = []
+                for fname in os.listdir(FAST_runDirectory):
+                    if fname.lower().endswith('.lin'):
+                        fname_base = os.path.splitext(os.path.splitext(fname)[0])[0]
+                        if fname_base not in lin_case_name:
+                            lin_case_name.append(fname_base)
+                lin_case_name.sort()
+
+        NLinTimes = self.modeling_options['Level2']['linearization']['NLinTimes']
         LinearTurbine = LinearTurbineModel(
             lin_file_dir=FAST_runDirectory,
             lin_file_names=lin_case_name,
@@ -369,15 +398,8 @@ class turbine_design:
         }
         linear_out = self.reduce_linear_model(linear_in)
         
-        self.modeling_options = modeling_options
-        self.analysis_options = analysis_options
-        self.result = wt_opt
         self.LinearTurbine = LinearTurbine
         self.linear = linear_out
-        LCOE = wt_opt.get_val('financese.lcoe', units='USD/(MW*h)')[0]
-        AEP = wt_opt.get_val("rotorse.rp.AEP", units="MW*h")[0]
-        self.cost_per_year = LCOE*AEP
-        self.design_life_year = self.turbine_model['assembly']['lifetime']
 
     def reduce_linear_model(self, linear):
         
