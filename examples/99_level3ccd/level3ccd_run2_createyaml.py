@@ -3,53 +3,38 @@ import sys
 import time
 start_time = time.time()
 import numpy as np
+import subprocess
 import yaml
-
-from level3ccd_class import (turbine_design, sql_design, surrogate_model)
+from level3ccd_class import (turbine_design, sql_design)
 
 dbpath = 'output/linear_data.db'
-ympath = os.path.dirname(dbpath)
-ofpath = os.path.join(ympath, 'OF_lin')
+max_cores = 1
+
+if len(sys.argv) > 1:
+    if sys.argv[1].lower() == '-np':
+        max_cores = int(sys.argv[2])
+
+if len(sys.argv) == 5:
+    i_start = int(sys.argv[3])
+    i_end = int(sys.argv[4])
+else:
+    i_start = 1
+    i_end = 9999999999
 
 d = sql_design(dbpath=dbpath)
 d.create_connection()
 total_design_id_list = d.get_design_id()
+d.close_connection()
+
+processes = set()
 
 for id_val in total_design_id_list:
-    linpath = os.path.join(ofpath, '{:08d}'.format(id_val))
-    if os.path.isdir(linpath):
-        # Get filenames for linearization results
-        linflist = []
-        for fname in os.listdir(linpath):
-            if fname.lower().endswith('.lin'):
-                fname_base = os.path.splitext(os.path.splitext(fname)[0])[0]
-                if fname_base not in linflist:
-                    linflist.append(fname_base)
-        linflist.sort()
-        
-        if len(linflist) > 0:
-            des, par = d.get_design_dict(id_val)
-            wt = turbine_design()
-            wt.design_SN = id_val
-            wt.design = des
-            wt.param = par
-            wt.create_turbine()
-            wt.compute_cost_only()
-            wt.save_linear_model(FAST_runDirectory=linpath, lin_case_name=linflist)
+    if (id_val < i_start) or (id_val > i_end):
+        continue
+    processes.add(subprocess.Popen(['python', 'level3ccd_designstore.py', dbpath, str(id_val)]))
+    if len(processes) >= max_cores:
+        os.wait()
+        processes.difference_update([p for p in processes if p.poll() is not None])
 
-            wt_linear_result = None
-            wt_linear_result = wt.linear
-            wt_linear_result['cost_per_year'] = float(wt.cost_per_year)
-            wt_linear_result['design_life_year'] = float(wt.design_life_year)
-            wt_linear_result['design'] = des
-            wt_linear_result['parameter'] = par
-
-            with open(os.path.join(ympath, '{:08d}.yaml'.format(id_val)), 'wt') as yml:
-                yaml.safe_dump(wt_linear_result, yml)
-
-    else:
-        print('WARNING, path {:} does not exist.'.format(os.path.join(ofpath, '{:08d}'.format(id_val))))
-
-d.cursor.close()
-d.conn.close()
-
+end_time = time.time()
+print('Time elapsed = {:} seconds'.format(end_time - start_time))
