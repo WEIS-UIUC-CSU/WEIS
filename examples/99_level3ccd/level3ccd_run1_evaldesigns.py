@@ -2,9 +2,8 @@ import os
 import sys
 import time
 start_time = time.time()
-import numpy as np
 import subprocess
-from level3ccd_class import (sql_design, surrogate_model)
+from level3ccd_class import sql_design
 
 dbpath = 'output/linear_data.db'
 max_cores = 1
@@ -23,8 +22,7 @@ else:
 d = sql_design(dbpath=dbpath)
 d.create_connection()
 total_design_id_list = d.get_design_id()
-d.cursor.close()
-d.conn.close()
+d.close_connection()
 
 processes = set()
 

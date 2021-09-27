@@ -2,15 +2,14 @@
 Usage:
     python level3ccd_designeval.py DB_PATH ID_NUM [EVAL=True] [PRINT=False]
 Example:
-    python level3ccd_designeval.py temp/linear_data.db 1
-    python level3ccd_designeval.py temp/linear_data.db 1 True
-    python level3ccd_designeval.py temp/linear_data.db 1 True False
+    python level3ccd_designeval.py output/linear_data.db 1
+    python level3ccd_designeval.py output/linear_data.db 1 True
+    python level3ccd_designeval.py output/linear_data.db 1 True False
 '''
 
 import os
 import sys
 import yaml
-import numpy as np
 from level3ccd_class import turbine_design
 from level3ccd_class import sql_design
 
