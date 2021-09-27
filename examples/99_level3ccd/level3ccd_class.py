@@ -230,7 +230,7 @@ class turbine_design:
                 + (np.array(self._ref_tower_dia) - self._ref_tower_dia[0]) \
                     *(d_tower_top_diameter - p_tower_bottom_diameter) \
                     /(self._ref_tower_dia[-1] - self._ref_tower_dia[0]),
-            kind='cubic'
+            kind='cubic', fill_value='extrapolate'
         )
         tower_diameter_fill = tower_diameter_interp1d(np.linspace(tower_zcoord_new[3], tower_top_height, p_tower_div - 1))
         for tidx in range(4, tower_diameter_new.shape[0]):
