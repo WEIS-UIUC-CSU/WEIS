@@ -1259,7 +1259,7 @@ class dfsm_class:
         print('Training surrogate model for operating point for Cost...')
         self.SM_COST = surrogate_model()
         self.SM_COST.surrogate_model = self.surrogate_model
-        self.SM_COST.add_train_pts(self.P_TRAIN, self.F_TRAIN_COST)i
+        self.SM_COST.add_train_pts(self.P_TRAIN, self.F_TRAIN_COST)
         self.SM_COST.training()
 
         print('Training completed.')
