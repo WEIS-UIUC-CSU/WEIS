@@ -1,9 +1,8 @@
 import os
 
-from scipy.interpolate import PchipInterpolator
-
 import numpy as np
 import openmdao.api as om
+from scipy.interpolate import PchipInterpolator
 
 
 class PoseOptimization(object):
@@ -432,8 +431,8 @@ class PoseOptimization(object):
             else:
                 wt_opt.model.add_objective("floatingse.tower_mass", ref=1e6)
 
-        elif self.opt["merit_figure"] == "mononpile_mass":
-            wt_opt.model.add_objective("towerse.mononpile_mass", ref=1e6)
+        elif self.opt["merit_figure"] == "monopile_mass":
+            wt_opt.model.add_objective("towerse.monopile_mass", ref=1e6)
 
         elif self.opt["merit_figure"] == "structural_mass":
             if not self.modeling["flags"]["floating"]:
@@ -470,6 +469,10 @@ class PoseOptimization(object):
                 wt_opt.model.add_objective("rotorse.rp.powercurve.Cp_regII", ref=-1.0)
             else:
                 wt_opt.model.add_objective("rotorse.ccblade.CP", ref=-1.0)
+
+        elif self.opt["merit_figure"] == "inverse_design":
+            wt_opt.model.add_objective("inverse_design.objective")
+
         else:
             raise ValueError("The merit figure " + self.opt["merit_figure"] + " is unknown or not supported.")
 
@@ -730,7 +733,6 @@ class PoseOptimization(object):
                 ref=1e3,
                 indices=[tower_material_index],
             )
-
         # -- Control --
         if control_opt["tsr"]["flag"]:
             wt_opt.model.add_design_var(
@@ -1302,15 +1304,20 @@ class PoseOptimization(object):
                 )
                 wt_opt["inn_af.L_D_opt"] = init_L_D_opt
 
-            if blade_opt["structure"]["spar_cap_ss"]["flag"] or blade_opt["structure"]["spar_cap_ps"]["flag"]:
-                wt_opt["blade.opt_var.s_opt_spar_cap_ss"] = np.linspace(
-                    0.0, 1.0, blade_opt["structure"]["spar_cap_ss"]["n_opt"]
-                )
-                wt_opt["blade.opt_var.s_opt_spar_cap_ps"] = np.linspace(
-                    0.0, 1.0, blade_opt["structure"]["spar_cap_ps"]["n_opt"]
-                )
-                spar_cap_ss_name = self.modeling["WISDEM"]["RotorSE"]["spar_cap_ss"]
-                spar_cap_ps_name = self.modeling["WISDEM"]["RotorSE"]["spar_cap_ps"]
+            wt_opt["blade.opt_var.s_opt_spar_cap_ss"] = np.linspace(
+                0.0, 1.0, blade_opt["structure"]["spar_cap_ss"]["n_opt"]
+            )
+            wt_opt["blade.opt_var.s_opt_spar_cap_ps"] = np.linspace(
+                0.0, 1.0, blade_opt["structure"]["spar_cap_ps"]["n_opt"]
+            )
+            spar_cap_ss_name = self.modeling["WISDEM"]["RotorSE"]["spar_cap_ss"]
+            spar_cap_ps_name = self.modeling["WISDEM"]["RotorSE"]["spar_cap_ps"]
+            if (
+                spar_cap_ss_name != "none"
+                and spar_cap_ps_name != "none"
+                and len(spar_cap_ss_name) > 0
+                and len(spar_cap_ps_name) > 0
+            ):
                 layer_name = self.modeling["WISDEM"]["RotorSE"]["layer_name"]
                 n_layers = self.modeling["WISDEM"]["RotorSE"]["n_layers"]
                 ss_before_ps = False
@@ -1349,11 +1356,11 @@ class PoseOptimization(object):
                 wt_opt["blade.opt_var.spar_cap_ss_opt"] = init_spar_cap_ss_opt
                 wt_opt["blade.opt_var.spar_cap_ps_opt"] = init_spar_cap_ps_opt
 
-            if blade_opt["structure"]["te_ss"]["flag"] or blade_opt["structure"]["te_ps"]["flag"]:
-                wt_opt["blade.opt_var.s_opt_te_ss"] = np.linspace(0.0, 1.0, blade_opt["structure"]["te_ss"]["n_opt"])
-                wt_opt["blade.opt_var.s_opt_te_ps"] = np.linspace(0.0, 1.0, blade_opt["structure"]["te_ps"]["n_opt"])
-                te_ss_name = self.modeling["WISDEM"]["RotorSE"]["te_ss"]
-                te_ps_name = self.modeling["WISDEM"]["RotorSE"]["te_ps"]
+            wt_opt["blade.opt_var.s_opt_te_ss"] = np.linspace(0.0, 1.0, blade_opt["structure"]["te_ss"]["n_opt"])
+            wt_opt["blade.opt_var.s_opt_te_ps"] = np.linspace(0.0, 1.0, blade_opt["structure"]["te_ps"]["n_opt"])
+            te_ss_name = self.modeling["WISDEM"]["RotorSE"]["te_ss"]
+            te_ps_name = self.modeling["WISDEM"]["RotorSE"]["te_ps"]
+            if te_ss_name != "none" and te_ps_name != "none" and len(te_ss_name) > 0 and len(te_ps_name) > 0:
                 layer_name = self.modeling["WISDEM"]["RotorSE"]["layer_name"]
                 n_layers = self.modeling["WISDEM"]["RotorSE"]["n_layers"]
                 ss_before_ps = False

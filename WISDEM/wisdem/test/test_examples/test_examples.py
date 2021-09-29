@@ -17,6 +17,7 @@ all_scripts = [
     "01_nrel_csm/mass",
     "01_nrel_csm/mass_and_cost",
     "01_nrel_csm/parametric",
+    "02_reference_turbines/iea10mw_driver",
     "03_blade/blade_driver",
     "04_openmdao/betz_limit",
     "04_openmdao/sellar",
@@ -49,6 +50,7 @@ all_scripts = [
     "13_design_of_experiments/doe_driver",
     "14_overridden_values/driver",
     "15_step_size_study/driver",
+    "16_inverse_design/inverse_spar_design",
 ]
 
 
