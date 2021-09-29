@@ -1,3 +1,11 @@
+'''
+Usage:
+    python level3ccd_run1_evaldesign.py -np [CORES] ([I_START] [I_END])
+Example:
+    python level3ccd_run1_evaldesign.py -np 60
+    python level3ccd_run1_evaldesign.py -np 60 1 100
+'''
+
 import os
 import sys
 import time
