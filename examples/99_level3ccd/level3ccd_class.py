@@ -5,6 +5,7 @@ import numpy as np
 import openmdao.api as om
 import weis
 import sqlite3
+import yaml
 
 from weis.glue_code.gc_LoadInputs           import WindTurbineOntologyPythonWEIS
 from wisdem.glue_code.gc_WT_InitModel       import yaml2openmdao
@@ -24,6 +25,7 @@ from matplotlib                             import pyplot as plt
 from matplotlib.patches                     import (Rectangle, Circle)
 from copy                                   import deepcopy
 from smt.sampling_methods                   import LHS
+from smt.surrogate_models                   import (KRG, KPLS, KPLSK)
 #from pyDOE2                                 import lhs
 
 
@@ -854,6 +856,8 @@ class surrogate_model:
         self._f_train = None
         self.sampling_model = None
         self._x_sampling = None
+        self.surrogate_model = None
+        self._sm = None
 
     def add_train_pts(self, x_train, f_train):
         
@@ -936,6 +940,7 @@ class surrogate_model:
             return self._x_sampling
 
     def split_list_chunks(self, fulllist, max_n_chunk=1, item_count=None):
+
         item_count = item_count or len(fulllist)
         n_chunks = min(item_count, max_n_chunk)
         fulllist = iter(fulllist)
@@ -945,6 +950,354 @@ class surrogate_model:
         for x_i in range(n_chunks):
             length = ceiling if x_i < stepdown else floor
             yield [next(fulllist) for _ in range(length)]
+
+    def training(self):
+
+        n_dim_x = self._n_dim_x
+        n_dim_f = self._n_dim_f
+        x_train = np.array(self._x_train)
+        f_train = np.array(self._f_train)
+
+        if self.surrogate_model.lower() == 'kpls':
+            self._sm = KPLS(print_global=False)
+        elif self.surrogate_model.lower() == 'kplsk':
+            self._sm = KPLSK(print_global=False)
+        else:
+            self._sm = KRG(print_global=False)
+        self._sm.set_training_values(x_train, f_train)
+        self._sm.train()
+
+    def predict(self, x):
+
+        return self._sm.predict_values(x)
+        
+
+class dfsm_class:
+
+    def __init__(self):
+
+        self._A_shape = None
+        self._A_len = None
+        self._B_shape = None
+        self._B_len = None
+        self._C_shape = None
+        self._C_len = None
+        self._D_shape = None
+        self._D_len = None
+        self.P_TRAIN = None
+        self.F_TRAIN_A = None
+        self.F_TRAIN_B = None
+        self.F_TRAIN_C = None
+        self.F_TRAIN_D = None
+        self.F_TRAIN_W_OPS = None
+        self.F_TRAIN_X_OPS = None
+        self.F_TRAIN_U_OPS = None
+        self.F_TRAIN_Y_OPS = None
+        self.SM_A = None
+        self.SM_B = None
+        self.SM_C = None
+        self.SM_D = None
+        self.SM_W_OPS = None
+        self.SM_X_OPS = None
+        self.SM_U_OPS = None
+        self.SM_Y_OPS = None
+        self.dbpath = None
+        self.surrogate_model = 'KPLS'
+
+    def load_linear_models(self, dbpath):
+
+        self.dbpath = dbpath
+
+        d = sql_design(dbpath = dbpath)
+        d.create_connection()
+        total_design_id_list = d.get_design_id()
+        d.close_connection()
+
+        ympath = os.path.dirname(dbpath)
+
+        P_TRAIN = None
+        F_TRAIN_A = None
+        F_TRAIN_B = None
+        F_TRAIN_C = None
+        F_TRAIN_D = None
+        F_TRAIN_W_OPS = None
+        F_TRAIN_X_OPS = None
+        F_TRAIN_U_OPS = None
+        F_TRAIN_Y_OPS = None
+
+        for id_val in total_design_id_list:
+
+            ymfpath = os.path.join(ympath, '{:08d}.yaml'.format(id_val))
+
+            if os.path.isfile(ymfpath):
+
+                with open(ymfpath, 'rt') as yml:
+                    dataset = yaml.safe_load(yml)
+                
+                u_h = np.array(dataset['u_h'])
+                hub_height = dataset['design']['hub_height']*np.ones(u_h.shape)
+                rotor_diameter = dataset['design']['rotor_diameter']*np.ones(u_h.shape)
+                tower_bottom_thickness = dataset['design']['tower_bottom_thickness']*np.ones(u_h.shape)
+                tower_top_diameter = dataset['design']['tower_top_diameter']*np.ones(u_h.shape)
+                tower_top_thickness = dataset['design']['tower_top_thickness']*np.ones(u_h.shape)
+                
+                p_train = np.append(
+                    np.array([u_h]).transpose(),
+                    np.append(
+                        np.array([hub_height]).transpose(),
+                        np.append(
+                            np.array([rotor_diameter]).transpose(),
+                            np.append(
+                                np.array([tower_bottom_thickness]).transpose(),
+                                np.append(
+                                    np.array([tower_top_diameter]).transpose(),
+                                    np.array([tower_top_thickness]).transpose(),
+                                    axis=1
+                                ),
+                                axis=1
+                            ),
+                            axis=1
+                        ),
+                        axis=1
+                    ),
+                    axis=1
+                )
+                if type(P_TRAIN) == type(None):
+                    P_TRAIN = deepcopy(p_train)
+                else:
+                    P_TRAIN = deepcopy(np.append(P_TRAIN, p_train, axis=0))
+
+                A_3d = np.array(dataset['A'])
+                B_3d = np.array(dataset['B'])
+                C_3d = np.array(dataset['C'])
+                D_3d = np.array(dataset['D'])
+                if type(self._A_shape) == type(None):
+                    self._A_shape = list(A_3d.shape)
+                    self._A_len = self._A_shape[0]*self._A_shape[1]
+                else:
+                    if not list(A_3d.shape) == self._A_shape:
+                        raise ValueError('Matrix A dimensions are not consistent.')
+                    if not self._A_shape[2] == len(u_h):
+                        raise ValueError('Missing wind speeds in matrix A.')
+                if type(self._B_shape) == type(None):
+                    self._B_shape = list(B_3d.shape)
+                    self._B_len = self._B_shape[0]*self._B_shape[1]
+                else:
+                    if not list(B_3d.shape) == self._B_shape:
+                        raise ValueError('Matrix B dimensions are not consistent.')
+                    if not self._B_shape[2] == len(u_h):
+                        raise ValueError('Missing wind speeds in matrix B.')
+                if type(self._C_shape) == type(None):
+                    self._C_shape = list(C_3d.shape)
+                    self._C_len = self._C_shape[0]*self._C_shape[1]
+                else:
+                    if not list(C_3d.shape) == self._C_shape:
+                        raise ValueError('Matrix C dimensions are not consistent.')
+                    if not self._C_shape[2] == len(u_h):
+                        raise ValueError('Missing wind speeds in matrix C.')
+                if type(self._D_shape) == type(None):
+                    self._D_shape = list(D_3d.shape)
+                    self._D_len = self._D_shape[0]*self._D_shape[1]
+                else:
+                    if not list(D_3d.shape) == self._D_shape:
+                        raise ValueError('Matrix D dimensions are not consistent.')
+                    if not self._D_shape[2] == len(u_h):
+                        raise ValueError('Missing wind speeds in matrix D.')
+                
+                f_train_A = np.zeros((0, self._A_len), dtype=float)
+                f_train_B = np.zeros((0, self._B_len), dtype=float)
+                f_train_C = np.zeros((0, self._C_len), dtype=float)
+                f_train_D = np.zeros((0, self._D_len), dtype=float)
+                for idx in range(0, len(u_h)):
+                    f_train_A = np.append(
+                        f_train_A,
+                        np.array([A_3d[:,:,idx].flatten()]),
+                        axis=0
+                    )
+                    f_train_B = np.append(
+                        f_train_B,
+                        np.array([B_3d[:,:,idx].flatten()]),
+                        axis=0
+                    )
+                    f_train_C = np.append(
+                        f_train_C,
+                        np.array([C_3d[:,:,idx].flatten()]),
+                        axis=0
+                    )
+                    f_train_D = np.append(
+                        f_train_D,
+                        np.array([D_3d[:,:,idx].flatten()]),
+                        axis=0
+                    )
+                
+                if type(F_TRAIN_A) == type(None):
+                    F_TRAIN_A = deepcopy(f_train_A)
+                else:
+                    F_TRAIN_A = deepcopy(np.append(F_TRAIN_A, f_train_A, axis=0))
+                if type(F_TRAIN_B) == type(None):
+                    F_TRAIN_B = deepcopy(f_train_B)
+                else:
+                    F_TRAIN_B = deepcopy(np.append(F_TRAIN_B, f_train_B, axis=0))
+                if type(F_TRAIN_C) == type(None):
+                    F_TRAIN_C = deepcopy(f_train_C)
+                else:
+                    F_TRAIN_C = deepcopy(np.append(F_TRAIN_C, f_train_C, axis=0))
+                if type(F_TRAIN_D) == type(None):
+                    F_TRAIN_D = deepcopy(f_train_D)
+                else:
+                    F_TRAIN_D = deepcopy(np.append(F_TRAIN_D, f_train_D, axis=0))
+                
+                f_train_w_ops = np.array([dataset['omega_rpm']]).transpose()
+                f_train_x_ops = np.array(dataset['x_ops']).transpose()
+                f_train_u_ops = np.array(dataset['u_ops']).transpose()
+                f_train_y_ops = np.array(dataset['y_ops']).transpose()
+
+                if type(F_TRAIN_W_OPS) == type(None):
+                    F_TRAIN_W_OPS = deepcopy(f_train_w_ops)
+                else:
+                    F_TRAIN_W_OPS = deepcopy(np.append(F_TRAIN_W_OPS, f_train_w_ops, axis=0))
+                if type(F_TRAIN_X_OPS) == type(None):
+                    F_TRAIN_X_OPS = deepcopy(f_train_x_ops)
+                else:
+                    F_TRAIN_X_OPS = deepcopy(np.append(F_TRAIN_X_OPS, f_train_x_ops, axis=0))
+                if type(F_TRAIN_U_OPS) == type(None):
+                    F_TRAIN_U_OPS = deepcopy(f_train_u_ops)
+                else:
+                    F_TRAIN_U_OPS = deepcopy(np.append(F_TRAIN_U_OPS, f_train_u_ops, axis=0))
+                if type(F_TRAIN_Y_OPS) == type(None):
+                    F_TRAIN_Y_OPS = deepcopy(f_train_y_ops)
+                else:
+                    F_TRAIN_Y_OPS = deepcopy(np.append(F_TRAIN_Y_OPS, f_train_y_ops, axis=0))
+
+        self.P_TRAIN = P_TRAIN
+        self.F_TRAIN_A = F_TRAIN_A
+        self.F_TRAIN_B = F_TRAIN_B
+        self.F_TRAIN_C = F_TRAIN_C
+        self.F_TRAIN_D = F_TRAIN_D
+        self.F_TRAIN_W_OPS = F_TRAIN_W_OPS
+        self.F_TRAIN_X_OPS = F_TRAIN_X_OPS
+        self.F_TRAIN_U_OPS = F_TRAIN_U_OPS
+        self.F_TRAIN_Y_OPS = F_TRAIN_Y_OPS
+        self._A_shape[2] = self.F_TRAIN_A.shape[0]
+        self._B_shape[2] = self.F_TRAIN_B.shape[0]
+        self._C_shape[2] = self.F_TRAIN_C.shape[0]
+        self._D_shape[2] = self.F_TRAIN_D.shape[0]
+    
+    def train_sm(self):
+
+        self.SM_A = surrogate_model()
+        self.SM_A.surrogate_model = self.surrogate_model
+        self.SM_A.add_train_pts(self.P_TRAIN, self.F_TRAIN_A)
+        self.SM_A.training()
+    
+        self.SM_B = surrogate_model()
+        self.SM_B.surrogate_model = self.surrogate_model
+        self.SM_B.add_train_pts(self.P_TRAIN, self.F_TRAIN_B)
+        self.SM_B.training()
+    
+        self.SM_C = surrogate_model()
+        self.SM_C.surrogate_model = self.surrogate_model
+        self.SM_C.add_train_pts(self.P_TRAIN, self.F_TRAIN_C)
+        self.SM_C.training()
+    
+        self.SM_D = surrogate_model()
+        self.SM_D.surrogate_model = self.surrogate_model
+        self.SM_D.add_train_pts(self.P_TRAIN, self.F_TRAIN_D)
+        self.SM_D.training()
+    
+        self.SM_W_OPS = surrogate_model()
+        self.SM_W_OPS.surrogate_model = self.surrogate_model
+        self.SM_W_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_W_OPS)
+        self.SM_W_OPS.training()
+    
+        self.SM_X_OPS = surrogate_model()
+        self.SM_X_OPS.surrogate_model = self.surrogate_model
+        self.SM_X_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_X_OPS)
+        self.SM_X_OPS.training()
+    
+        self.SM_U_OPS = surrogate_model()
+        self.SM_U_OPS.surrogate_model = self.surrogate_model
+        self.SM_U_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_U_OPS)
+        self.SM_U_OPS.training()
+    
+        self.SM_Y_OPS = surrogate_model()
+        self.SM_Y_OPS.surrogate_model = self.surrogate_model
+        self.SM_Y_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_Y_OPS)
+        self.SM_Y_OPS.training()
+
+    def predict_sm_A(self, p, squeeze=True):
+
+        f = self.SM_A.predict(p)
+        nt = f.shape[0]
+        nd1, nd2 = self._A_shape[0:2]
+        if squeeze:
+            return np.squeeze(np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1))
+        else:
+            return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
+
+    def predict_sm_B(self, p, squeeze=True):
+
+        f = self.SM_B.predict(p)
+        nt = f.shape[0]
+        nd1, nd2 = self._B_shape[0:2]
+        if squeeze:
+            return np.squeeze(np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1))
+        else:
+            return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
+
+    def predict_sm_C(self, p, squeeze=True):
+
+        f = self.SM_C.predict(p)
+        nt = f.shape[0]
+        nd1, nd2 = self._C_shape[0:2]
+        if squeeze:
+            return np.squeeze(np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1))
+        else:
+            return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
+
+    def predict_sm_D(self, p, squeeze=True):
+
+        f = self.SM_D.predict(p)
+        nt = f.shape[0]
+        nd1, nd2 = self._D_shape[0:2]
+        if squeeze:
+            return np.squeeze(np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1))
+        else:
+            return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
+
+    def predict_sm_W_OPS(self, p, squeeze=True):
+
+        f = self.SM_W_OPS.predict(p)
+        if squeeze:
+            return np.squeeze(f)
+        else:
+            return f
+
+    def predict_sm_X_OPS(self, p, squeeze=True):
+
+        f = self.SM_X_OPS.predict(p)
+        if squeeze:
+            return np.squeeze(f)
+        else:
+            return f
+
+    def predict_sm_U_OPS(self, p, squeeze=True):
+
+        f = self.SM_U_OPS.predict(p)
+        if squeeze:
+            return np.squeeze(f)
+        else:
+            return f
+
+    def predict_sm_Y_OPS(self, p, squeeze=True):
+
+        f = self.SM_Y_OPS.predict(p)
+        if squeeze:
+            return np.squeeze(f)
+        else:
+            return f
+    
+
 
 
 class optimization_problem:
