@@ -1,6 +1,4 @@
 import os
-#import sys
-#import pickle
 import numpy as np
 import openmdao.api as om
 import weis
@@ -13,20 +11,15 @@ from weis.glue_code.gc_PoseOptimization     import PoseOptimizationWEIS
 from weis.glue_code.glue_code               import WindPark
 from weis.glue_code.gc_ROSCOInputs          import assign_ROSCO_values
 from weis.control.LinearModel               import LinearTurbineModel
-#from weis.aeroelasticse.FAST_reader         import InputReader_OpenFAST
-#from wisdem.commonse                        import fileIO
 from wisdem.glue_code.gc_PoseOptimization   import PoseOptimization as PoseOptimizationWISDEM
 
 from scipy.interpolate                      import interp1d
-#from scipy.special                          import comb
 from scipy.optimize                         import minimize, approx_fprime
-#from numpy.matlib                           import repmat
 from matplotlib                             import pyplot as plt
 from matplotlib.patches                     import (Rectangle, Circle)
 from copy                                   import deepcopy
 from smt.sampling_methods                   import LHS
 from smt.surrogate_models                   import (KRG, KPLS, KPLSK)
-#from pyDOE2                                 import lhs
 
 
 class turbine_design:
@@ -123,6 +116,7 @@ class turbine_design:
         self._d_tower_bottom_thickness_default = 0.041058
         self._d_tower_top_thickness_default = 0.020826
         self._d_rotor_diameter_default = 240
+
 
     def create_turbine(self):
 
@@ -277,7 +271,8 @@ class turbine_design:
         self.turbine_model['components']['monopile']['outer_shape_bem']['outer_diameter']['values'] = (np.ones(shape=(len(self._ref_monopile_dia)), dtype=float)*p_tower_bottom_diameter).tolist()
         self.turbine_model['components']['monopile']['internal_structure_2d_fem']['reference_axis']['z']['values'] = monopile_z_coord_new.tolist()
         self.turbine_model['environment']['water_depth'] = p_water_depth
-        
+
+
     def compute_cost_only(self):
         
         turbine_model = deepcopy(self.turbine_model)
@@ -309,13 +304,15 @@ class turbine_design:
         print('COST PER YEAR = {:} USD/YEAR'.format(self.cost_per_year))
         print('DESIGN LIFE = {:} YEARS'.format(self.design_life_year))
 
+
     def compute_full_model(self, OF_run_dir=None):
 
         if not self.wt_opt:
             self.pose_wt_model(OF_run_dir)
         self.wt_opt.run_model()
         self.save_linear_model()
-        
+
+
     def pose_wt_model(self, OF_run_dir=None):
         
         turbine_model = deepcopy(self.turbine_model)
@@ -356,6 +353,7 @@ class turbine_design:
         self.analysis_options = deepcopy(analysis_options)
         self.turbine_model = deepcopy(turbine_model)
         self.wt_opt = wt_opt
+
 
     def save_linear_model(self, FAST_runDirectory=None, lin_case_name=None):
         
@@ -402,6 +400,7 @@ class turbine_design:
         
         self.LinearTurbine = LinearTurbine
         self.linear = linear_out
+
 
     def reduce_linear_model(self, linear):
         
@@ -548,6 +547,7 @@ class turbine_design:
         }
         return linear_out
 
+
     def visualize_turbine(self):
 
         # Load turbine model
@@ -679,7 +679,8 @@ class sql_design:
                 setattr(self, k, w)
             except:
                 pass
-        
+
+
     def create_connection(self):
         
         if self.dbpath == '':
@@ -701,12 +702,14 @@ class sql_design:
         else:
             self.cursor = None
 
+
     def remove_db(self):
         if os.path.isfile(self.dbpath):
             try:
                 os.remove(self.dbpath)
             except OSError:
                 print('DB file cannot be removed.')
+
 
     def close_connection(self):
         
@@ -715,6 +718,7 @@ class sql_design:
         
         if self.conn:
             self.conn.close()
+
 
     def create_table(self):
         
@@ -745,7 +749,8 @@ class sql_design:
             self.cursor.execute(create_table_sql)
         except sqlite3.Error as e:
             print(e)
-    
+
+
     def add_data(self, design, param):
         
         if self.conn == None:
@@ -783,7 +788,8 @@ class sql_design:
             self.cursor.execute(sql, tuple(val))
         except sqlite3.Error as e:
             print(e)
-            
+
+
     def get_design_id(self):
         
         if self.conn == None:
@@ -807,7 +813,8 @@ class sql_design:
             out = []
             
         return out
-    
+
+
     def get_design_dict(self, id_num):
         
         if self.conn == None:
@@ -859,6 +866,7 @@ class surrogate_model:
         self.surrogate_model = None
         self._sm = None
 
+
     def add_train_pts(self, x_train, f_train):
         
         x_train = np.array(x_train)
@@ -900,6 +908,7 @@ class surrogate_model:
             axis = 0
         )
 
+
     def sampling(self, nt, xlimits, criterion='ese', random_state=0, extreme=True):
         
         dim = xlimits.shape[0]
@@ -939,6 +948,7 @@ class surrogate_model:
         else:
             return self._x_sampling
 
+
     def split_list_chunks(self, fulllist, max_n_chunk=1, item_count=None):
 
         item_count = item_count or len(fulllist)
@@ -950,6 +960,7 @@ class surrogate_model:
         for x_i in range(n_chunks):
             length = ceiling if x_i < stepdown else floor
             yield [next(fulllist) for _ in range(length)]
+
 
     def training(self):
 
@@ -966,6 +977,7 @@ class surrogate_model:
             self._sm = KRG(print_global=False)
         self._sm.set_training_values(x_train, f_train)
         self._sm.train()
+
 
     def predict(self, x):
 
@@ -993,6 +1005,7 @@ class dfsm_class:
         self.F_TRAIN_X_OPS = None
         self.F_TRAIN_U_OPS = None
         self.F_TRAIN_Y_OPS = None
+        self.F_TRAIN_COST = None
         self.SM_A = None
         self.SM_B = None
         self.SM_C = None
@@ -1001,8 +1014,10 @@ class dfsm_class:
         self.SM_X_OPS = None
         self.SM_U_OPS = None
         self.SM_Y_OPS = None
+        self.SM_COST = None
         self.dbpath = None
-        self.surrogate_model = 'KPLS'
+        self.surrogate_model = 'KRG'
+
 
     def load_linear_models(self, dbpath):
 
@@ -1024,6 +1039,7 @@ class dfsm_class:
         F_TRAIN_X_OPS = None
         F_TRAIN_U_OPS = None
         F_TRAIN_Y_OPS = None
+        F_TRAIN_COST = None
 
         for id_val in total_design_id_list:
 
@@ -1151,6 +1167,7 @@ class dfsm_class:
                 f_train_x_ops = np.array(dataset['x_ops']).transpose()
                 f_train_u_ops = np.array(dataset['u_ops']).transpose()
                 f_train_y_ops = np.array(dataset['y_ops']).transpose()
+                f_train_cost = dataset['cost_per_year']*np.ones(f_train_w_ops.shape, dtype=floa)
 
                 if type(F_TRAIN_W_OPS) == type(None):
                     F_TRAIN_W_OPS = deepcopy(f_train_w_ops)
@@ -1168,6 +1185,10 @@ class dfsm_class:
                     F_TRAIN_Y_OPS = deepcopy(f_train_y_ops)
                 else:
                     F_TRAIN_Y_OPS = deepcopy(np.append(F_TRAIN_Y_OPS, f_train_y_ops, axis=0))
+                if type(F_TRAIN_COST) == type(None):
+                    F_TRAIN_COST = deepcopy(f_train_cost)
+                else:
+                    F_TRAIN_COST = deepcopy(np.append(F_TRAIN_COST, f_train_cost, axis=0))
 
         self.P_TRAIN = P_TRAIN
         self.F_TRAIN_A = F_TRAIN_A
@@ -1178,52 +1199,71 @@ class dfsm_class:
         self.F_TRAIN_X_OPS = F_TRAIN_X_OPS
         self.F_TRAIN_U_OPS = F_TRAIN_U_OPS
         self.F_TRAIN_Y_OPS = F_TRAIN_Y_OPS
+        self.F_TRAIN_COST = F_TRAIN_COST
         self._A_shape[2] = self.F_TRAIN_A.shape[0]
         self._B_shape[2] = self.F_TRAIN_B.shape[0]
         self._C_shape[2] = self.F_TRAIN_C.shape[0]
         self._D_shape[2] = self.F_TRAIN_D.shape[0]
-    
+
+
     def train_sm(self):
 
+        print('Training surrogate model for A matrix...')
         self.SM_A = surrogate_model()
         self.SM_A.surrogate_model = self.surrogate_model
         self.SM_A.add_train_pts(self.P_TRAIN, self.F_TRAIN_A)
         self.SM_A.training()
     
+        print('Training surrogate model for B matrix...')
         self.SM_B = surrogate_model()
         self.SM_B.surrogate_model = self.surrogate_model
         self.SM_B.add_train_pts(self.P_TRAIN, self.F_TRAIN_B)
         self.SM_B.training()
     
+        print('Training surrogate model for C matrix...')
         self.SM_C = surrogate_model()
         self.SM_C.surrogate_model = self.surrogate_model
         self.SM_C.add_train_pts(self.P_TRAIN, self.F_TRAIN_C)
         self.SM_C.training()
     
+        print('Training surrogate model for D matrix...')
         self.SM_D = surrogate_model()
         self.SM_D.surrogate_model = self.surrogate_model
         self.SM_D.add_train_pts(self.P_TRAIN, self.F_TRAIN_D)
         self.SM_D.training()
     
+        print('Training surrogate model for operating point for Omega...')
         self.SM_W_OPS = surrogate_model()
         self.SM_W_OPS.surrogate_model = self.surrogate_model
         self.SM_W_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_W_OPS)
         self.SM_W_OPS.training()
     
+        print('Training surrogate model for operating point for States...')
         self.SM_X_OPS = surrogate_model()
         self.SM_X_OPS.surrogate_model = self.surrogate_model
         self.SM_X_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_X_OPS)
         self.SM_X_OPS.training()
     
+        print('Training surrogate model for operating point for Inputs...')
         self.SM_U_OPS = surrogate_model()
         self.SM_U_OPS.surrogate_model = self.surrogate_model
         self.SM_U_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_U_OPS)
         self.SM_U_OPS.training()
     
+        print('Training surrogate model for operating point for Outputs...')
         self.SM_Y_OPS = surrogate_model()
         self.SM_Y_OPS.surrogate_model = self.surrogate_model
         self.SM_Y_OPS.add_train_pts(self.P_TRAIN, self.F_TRAIN_Y_OPS)
         self.SM_Y_OPS.training()
+
+        print('Training surrogate model for operating point for Cost...')
+        self.SM_COST = surrogate_model()
+        self.SM_COST.surrogate_model = self.surrogate_model
+        self.SM_COST.add_train_pts(self.P_TRAIN, self.F_TRAIN_COST)i
+        self.SM_COST.training()
+
+        print('Training completed.')
+
 
     def predict_sm_A(self, p, squeeze=True):
 
@@ -1235,6 +1275,7 @@ class dfsm_class:
         else:
             return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
 
+
     def predict_sm_B(self, p, squeeze=True):
 
         f = self.SM_B.predict(p)
@@ -1244,6 +1285,7 @@ class dfsm_class:
             return np.squeeze(np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1))
         else:
             return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
+
 
     def predict_sm_C(self, p, squeeze=True):
 
@@ -1255,6 +1297,7 @@ class dfsm_class:
         else:
             return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
 
+
     def predict_sm_D(self, p, squeeze=True):
 
         f = self.SM_D.predict(p)
@@ -1265,6 +1308,7 @@ class dfsm_class:
         else:
             return np.moveaxis(f.reshape(nt, nd1, nd2), 0, -1)
 
+
     def predict_sm_W_OPS(self, p, squeeze=True):
 
         f = self.SM_W_OPS.predict(p)
@@ -1272,6 +1316,7 @@ class dfsm_class:
             return np.squeeze(f)
         else:
             return f
+
 
     def predict_sm_X_OPS(self, p, squeeze=True):
 
@@ -1281,6 +1326,7 @@ class dfsm_class:
         else:
             return f
 
+
     def predict_sm_U_OPS(self, p, squeeze=True):
 
         f = self.SM_U_OPS.predict(p)
@@ -1288,6 +1334,7 @@ class dfsm_class:
             return np.squeeze(f)
         else:
             return f
+
 
     def predict_sm_Y_OPS(self, p, squeeze=True):
 
@@ -1297,6 +1344,14 @@ class dfsm_class:
         else:
             return f
     
+
+    def predict_sm_COST(self, p, squeeze=True):
+
+        f = self.SM_COST.predict(p)
+        if squeeze:
+            return np.squeeze(f)
+        else:
+            return f
 
 
 
