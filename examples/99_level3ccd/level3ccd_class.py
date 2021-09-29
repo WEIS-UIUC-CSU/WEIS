@@ -1062,12 +1062,12 @@ class dfsm_class:
                     np.append(
                         np.array([hub_height]).transpose(),
                         np.append(
-                            np.array([rotor_diameter]).transpose(),
+                            np.array([tower_top_diameter]).transpose(),
                             np.append(
                                 np.array([tower_bottom_thickness]).transpose(),
                                 np.append(
-                                    np.array([tower_top_diameter]).transpose(),
                                     np.array([tower_top_thickness]).transpose(),
+                                    np.array([rotor_diameter]).transpose(),
                                     axis=1
                                 ),
                                 axis=1
