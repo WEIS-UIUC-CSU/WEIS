@@ -1167,7 +1167,7 @@ class dfsm_class:
                 f_train_x_ops = np.array(dataset['x_ops']).transpose()
                 f_train_u_ops = np.array(dataset['u_ops']).transpose()
                 f_train_y_ops = np.array(dataset['y_ops']).transpose()
-                f_train_cost = dataset['cost_per_year']*np.ones(f_train_w_ops.shape, dtype=floa)
+                f_train_cost = dataset['cost_per_year']*np.ones(f_train_w_ops.shape, dtype=float)
 
                 if type(F_TRAIN_W_OPS) == type(None):
                     F_TRAIN_W_OPS = deepcopy(f_train_w_ops)
