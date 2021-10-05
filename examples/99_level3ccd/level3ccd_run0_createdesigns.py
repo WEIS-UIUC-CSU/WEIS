@@ -8,15 +8,15 @@ from level3ccd_class import (sql_design, surrogate_model)
 
 # Define design problem
 
-N = 200                 # number of sample points
+N = 400                 # number of sample points
 max_cores = 1
 random_state = 0
 xlimits = np.array([
-    [145.0, 155.0],     # hub_height
-    [5.9, 7.1],         # tower_top_diameter
-    [0.035, 0.045],       # tower_bottom_thickness
-    [0.015, 0.025],     # tower_top_thickness
-    [230.0, 250.0]      # rotor_diameter
+    [140.0, 160.0],     # hub_height
+    [5.5, 7.5],         # tower_top_diameter
+    [0.030, 0.050],       # tower_bottom_thickness
+    [0.010, 0.030],     # tower_top_thickness
+    [220.0, 260.0]      # rotor_diameter
 ])
 param = {
     'tower_div': 11,
