@@ -32,12 +32,15 @@ linpath = os.path.join(ofpath, '{:08d}'.format(id_val)) # ./output/OF_lin/000000
 if os.path.isdir(linpath):
     # Get filenames for linearization results
     linflist = []
+    linflistall = []
     for fname in os.listdir(linpath):
         if fname.lower().endswith('.lin'):
+            linflistall.append(fname)
             fname_base = os.path.splitext(os.path.splitext(fname)[0])[0]
             if fname_base not in linflist:
                 linflist.append(fname_base)
     linflist.sort()
+    linflistall.sort()
     
     if len(linflist) > 0:
         wt = turbine_design()
@@ -45,18 +48,28 @@ if os.path.isdir(linpath):
         wt.design = des
         wt.param = par
         wt.create_turbine()
-        wt.compute_cost_only()
-        wt.save_linear_model(FAST_runDirectory=linpath, lin_case_name=linflist)
+        wind_speeds = wt.modeling_options['Level2']['linearization']['wind_speeds']
+        NLinTimes = wt.modeling_options['Level2']['linearization']['NLinTimes']
+        if len(wind_speeds) == len(linflist):
+            if len(wind_speeds)*NLinTimes == len(linflistall):
+                wt.compute_cost_only()
+                wt.save_linear_model(FAST_runDirectory=linpath, lin_case_name=linflist)
 
-        wt_linear_result = None
-        wt_linear_result = wt.linear
-        wt_linear_result['cost_per_year'] = float(wt.cost_per_year)
-        wt_linear_result['design_life_year'] = float(wt.design_life_year)
-        wt_linear_result['design'] = des
-        wt_linear_result['parameter'] = par
+                wt_linear_result = None
+                wt_linear_result = wt.linear
+                wt_linear_result['cost_per_year'] = float(wt.cost_per_year)
+                wt_linear_result['design_life_year'] = float(wt.design_life_year)
+                wt_linear_result['design'] = des
+                wt_linear_result['parameter'] = par
 
-        with open(os.path.join(ympath, '{:08d}.yaml'.format(id_val)), 'wt') as yml:
-            yaml.safe_dump(wt_linear_result, yml)
+                with open(os.path.join(ympath, '{:08d}.yaml'.format(id_val)), 'wt') as yml:
+                    yaml.safe_dump(wt_linear_result, yml)
 
+            else:
+                print('WARNING, path {:} has missing .lin files.'.format(os.path.join(ofpath, '{:08d}'.format(id_val))))
+        else:
+            print('WARNING, path {:} has missing wind speeds.'.format(os.path.join(ofpath, '{:08d}'.format(id_val))))
+    else:
+        print('WARNING, unable to find .lin files from path {:}.'.format(os.path.join(ofpath, '{:08d}'.format(id_val))))
 else:
     print('WARNING, path {:} does not exist.'.format(os.path.join(ofpath, '{:08d}'.format(id_val))))
