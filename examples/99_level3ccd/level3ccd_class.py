@@ -971,11 +971,11 @@ class surrogate_model:
         f_train = np.array(self._f_train)
 
         if self.surrogate_model.lower() == 'kpls':
-            self._sm = KPLS(print_global=False)
+            self._sm = KPLS(print_global=False,poly='constant',corr='squar_exp')
         elif self.surrogate_model.lower() == 'kplsk':
-            self._sm = KPLSK(print_global=False)
+            self._sm = KPLSK(print_global=False,poly='constant',corr='squar_exp')
         else:
-            self._sm = KRG(print_global=False)
+            self._sm = KRG(print_global=False,poly='constant',corr='matern52')
         self._sm.set_training_values(x_train, f_train)
         self._sm.train()
 
@@ -1222,43 +1222,63 @@ class dfsm_class:
         print('Scaling data for DFSM training...')
         self.D_TRAIN = np.max(self.P_TRAIN, axis=0) - np.min(self.P_TRAIN, axis=0)
         self.D_TRAIN = np.where(self.D_TRAIN < 1.0e-9, 1.0, self.D_TRAIN)
-        P_TRAIN = self.P_TRAIN/repmat(self.D_TRAIN, self.P_TRAIN.shape[0], 1)
+        self.M_TRAIN = np.min(self.P_TRAIN, axis=0)
+        P_TRAIN = (self.P_TRAIN - repmat(self.M_TRAIN, self.P_TRAIN.shape[0], 1)
+            )/repmat(self.D_TRAIN, self.P_TRAIN.shape[0], 1)
 
         self.D_TRAIN_A = np.max(self.F_TRAIN_A, axis=0) - np.min(self.F_TRAIN_A, axis=0)
         self.D_TRAIN_A = np.where(self.D_TRAIN_A < 1.0e-9, 1.0, self.D_TRAIN_A)
-        F_TRAIN_A = self.F_TRAIN_A/repmat(self.D_TRAIN_A, self.F_TRAIN_A.shape[0], 1)
+        self.M_TRAIN_A = np.min(self.F_TRAIN_A, axis=0)
+        F_TRAIN_A = (self.F_TRAIN_A - repmat(self.M_TRAIN_A, self.F_TRAIN_A.shape[0], 1)
+            )/repmat(self.D_TRAIN_A, self.F_TRAIN_A.shape[0], 1)
 
         self.D_TRAIN_B = np.max(self.F_TRAIN_B, axis=0) - np.min(self.F_TRAIN_B, axis=0)
         self.D_TRAIN_B = np.where(self.D_TRAIN_B < 1.0e-9, 1.0, self.D_TRAIN_B)
-        F_TRAIN_B = self.F_TRAIN_B/repmat(self.D_TRAIN_B, self.F_TRAIN_B.shape[0], 1)
+        self.M_TRAIN_B = np.min(self.F_TRAIN_B, axis=0)
+        F_TRAIN_B = (self.F_TRAIN_B - repmat(self.M_TRAIN_B, self.F_TRAIN_B.shape[0], 1)
+            )/repmat(self.D_TRAIN_B, self.F_TRAIN_B.shape[0], 1)
 
         self.D_TRAIN_C = np.max(self.F_TRAIN_C, axis=0) - np.min(self.F_TRAIN_C, axis=0)
         self.D_TRAIN_C = np.where(self.D_TRAIN_C < 1.0e-9, 1.0, self.D_TRAIN_C)
-        F_TRAIN_C = self.F_TRAIN_C/repmat(self.D_TRAIN_C, self.F_TRAIN_C.shape[0], 1)
+        self.M_TRAIN_C = np.min(self.F_TRAIN_C, axis=0)
+        F_TRAIN_C = (self.F_TRAIN_C - repmat(self.M_TRAIN_C, self.F_TRAIN_C.shape[0], 1)
+            )/repmat(self.D_TRAIN_C, self.F_TRAIN_C.shape[0], 1)
 
         self.D_TRAIN_D = np.max(self.F_TRAIN_D, axis=0) - np.min(self.F_TRAIN_D, axis=0)
         self.D_TRAIN_D = np.where(self.D_TRAIN_D < 1.0e-9, 1.0, self.D_TRAIN_D)
-        F_TRAIN_D = self.F_TRAIN_D/repmat(self.D_TRAIN_D, self.F_TRAIN_D.shape[0], 1)
+        self.M_TRAIN_D = np.min(self.F_TRAIN_D, axis=0)
+        F_TRAIN_D = (self.F_TRAIN_D - repmat(self.M_TRAIN_D, self.F_TRAIN_D.shape[0], 1)
+            )/repmat(self.D_TRAIN_D, self.F_TRAIN_D.shape[0], 1)
 
         self.D_TRAIN_W_OPS = np.max(self.F_TRAIN_W_OPS, axis=0) - np.min(self.F_TRAIN_W_OPS, axis=0)
         self.D_TRAIN_W_OPS = np.where(self.D_TRAIN_W_OPS < 1.0e-9, 1.0, self.D_TRAIN_W_OPS)
-        F_TRAIN_W_OPS = self.F_TRAIN_W_OPS/repmat(self.D_TRAIN_W_OPS, self.F_TRAIN_W_OPS.shape[0], 1)
+        self.M_TRAIN_W_OPS = np.min(self.F_TRAIN_W_OPS, axis=0)
+        F_TRAIN_W_OPS = (self.F_TRAIN_W_OPS - repmat(self.M_TRAIN_W_OPS, self.F_TRAIN_W_OPS.shape[0], 1)
+            )/repmat(self.D_TRAIN_W_OPS, self.F_TRAIN_W_OPS.shape[0], 1)
 
         self.D_TRAIN_X_OPS = np.max(self.F_TRAIN_X_OPS, axis=0) - np.min(self.F_TRAIN_X_OPS, axis=0)
         self.D_TRAIN_X_OPS = np.where(self.D_TRAIN_X_OPS < 1.0e-9, 1.0, self.D_TRAIN_X_OPS)
-        F_TRAIN_X_OPS = self.F_TRAIN_X_OPS/repmat(self.D_TRAIN_X_OPS, self.F_TRAIN_X_OPS.shape[0], 1)
+        self.M_TRAIN_X_OPS = np.min(self.F_TRAIN_X_OPS, axis=0)
+        F_TRAIN_X_OPS = (self.F_TRAIN_X_OPS - repmat(self.M_TRAIN_X_OPS, self.F_TRAIN_X_OPS.shape[0], 1)
+            )/repmat(self.D_TRAIN_X_OPS, self.F_TRAIN_X_OPS.shape[0], 1)
         
         self.D_TRAIN_U_OPS = np.max(self.F_TRAIN_U_OPS, axis=0) - np.min(self.F_TRAIN_U_OPS, axis=0)
         self.D_TRAIN_U_OPS = np.where(self.D_TRAIN_U_OPS < 1.0e-9, 1.0, self.D_TRAIN_U_OPS)
-        F_TRAIN_U_OPS = self.F_TRAIN_U_OPS/repmat(self.D_TRAIN_U_OPS, self.F_TRAIN_U_OPS.shape[0], 1)
+        self.M_TRAIN_U_OPS = np.min(self.F_TRAIN_U_OPS, axis=0)
+        F_TRAIN_U_OPS = (self.F_TRAIN_U_OPS - repmat(self.M_TRAIN_U_OPS, self.F_TRAIN_U_OPS.shape[0], 1)
+            )/repmat(self.D_TRAIN_U_OPS, self.F_TRAIN_U_OPS.shape[0], 1)
 
         self.D_TRAIN_Y_OPS = np.max(self.F_TRAIN_Y_OPS, axis=0) - np.min(self.F_TRAIN_Y_OPS, axis=0)
         self.D_TRAIN_Y_OPS = np.where(self.D_TRAIN_Y_OPS < 1.0e-9, 1.0, self.D_TRAIN_Y_OPS)
-        F_TRAIN_Y_OPS = self.F_TRAIN_Y_OPS/repmat(self.D_TRAIN_Y_OPS, self.F_TRAIN_Y_OPS.shape[0], 1)
+        self.M_TRAIN_Y_OPS = np.min(self.F_TRAIN_Y_OPS, axis=0)
+        F_TRAIN_Y_OPS = (self.F_TRAIN_Y_OPS - repmat(self.M_TRAIN_Y_OPS, self.F_TRAIN_Y_OPS.shape[0], 1)
+            )/repmat(self.D_TRAIN_Y_OPS, self.F_TRAIN_Y_OPS.shape[0], 1)
 
         self.D_TRAIN_COST = np.max(self.F_TRAIN_COST, axis=0) - np.min(self.F_TRAIN_COST, axis=0)
         self.D_TRAIN_COST = np.where(self.D_TRAIN_COST < 1.0e-9, 1.0, self.D_TRAIN_COST)
-        F_TRAIN_COST = self.F_TRAIN_COST/repmat(self.D_TRAIN_COST, self.F_TRAIN_COST.shape[0], 1)
+        self.M_TRAIN_COST = np.min(self.F_TRAIN_COST, axis=0)
+        F_TRAIN_COST = (self.F_TRAIN_COST - repmat(self.M_TRAIN_COST, self.F_TRAIN_COST.shape[0], 1)
+            )/repmat(self.D_TRAIN_COST, self.F_TRAIN_COST.shape[0], 1)
 
         print('Training surrogate model for A matrix...')
         self.SM_A = surrogate_model()
@@ -1311,7 +1331,7 @@ class dfsm_class:
         print('Training surrogate model for operating point for Cost...')
         self.SM_COST = surrogate_model()
         self.SM_COST.surrogate_model = self.surrogate_model
-        self.SM_COST.add_train_pts(P_TRAIN, F_TRAIN_COST)
+        self.SM_COST.add_train_pts(P_TRAIN[:,1:], F_TRAIN_COST) # omit wind speed column from P_TRAIN
         self.SM_COST.training()
 
         print('Training completed.')
@@ -1319,9 +1339,11 @@ class dfsm_class:
 
     def predict_sm_A(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_A, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_A, p.shape[0], 1)
-        f = self.SM_A.predict(p/pD)*sD
+        f = self.SM_A.predict((p - pM)/pD)*sD + sM
         nt = f.shape[0]
         nd1, nd2 = self._A_shape[0:2]
         if squeeze:
@@ -1332,9 +1354,11 @@ class dfsm_class:
 
     def predict_sm_B(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_B, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_B, p.shape[0], 1)
-        f = self.SM_B.predict(p/pD)*sD
+        f = self.SM_B.predict((p - pM)/pD)*sD + sM
         nt = f.shape[0]
         nd1, nd2 = self._B_shape[0:2]
         if squeeze:
@@ -1345,9 +1369,11 @@ class dfsm_class:
 
     def predict_sm_C(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_C, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_C, p.shape[0], 1)
-        f = self.SM_C.predict(p/pD)*sD
+        f = self.SM_C.predict((p - pM)/pD)*sD + sM
         nt = f.shape[0]
         nd1, nd2 = self._C_shape[0:2]
         if squeeze:
@@ -1358,9 +1384,11 @@ class dfsm_class:
 
     def predict_sm_D(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_D, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_D, p.shape[0], 1)
-        f = self.SM_D.predict(p/pD)*sD
+        f = self.SM_D.predict((p - pM)/pD)*sD + sM
         nt = f.shape[0]
         nd1, nd2 = self._D_shape[0:2]
         if squeeze:
@@ -1371,9 +1399,11 @@ class dfsm_class:
 
     def predict_sm_W_OPS(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_W_OPS, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_W_OPS, p.shape[0], 1)
-        f = self.SM_W_OPS.predict(p/pD)*sD
+        f = self.SM_W_OPS.predict((p - pM)/pD)*sD + sM
         if squeeze:
             return np.squeeze(f)
         else:
@@ -1382,9 +1412,11 @@ class dfsm_class:
 
     def predict_sm_X_OPS(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_X_OPS, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_X_OPS, p.shape[0], 1)
-        f = self.SM_X_OPS.predict(p/pD)*sD
+        f = self.SM_X_OPS.predict((p - pM)/pD)*sD + sM
         if squeeze:
             return np.squeeze(f)
         else:
@@ -1393,9 +1425,11 @@ class dfsm_class:
 
     def predict_sm_U_OPS(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_U_OPS, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_U_OPS, p.shape[0], 1)
-        f = self.SM_U_OPS.predict(p/pD)*sD
+        f = self.SM_U_OPS.predict((p - pM)/pD)*sD + sM
         if squeeze:
             return np.squeeze(f)
         else:
@@ -1404,9 +1438,11 @@ class dfsm_class:
 
     def predict_sm_Y_OPS(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_Y_OPS, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_Y_OPS, p.shape[0], 1)
-        f = self.SM_Y_OPS.predict(p/pD)*sD
+        f = self.SM_Y_OPS.predict((p - pM)/pD)*sD + sM
         if squeeze:
             return np.squeeze(f)
         else:
@@ -1415,9 +1451,11 @@ class dfsm_class:
 
     def predict_sm_COST(self, p, squeeze=True):
 
+        pM = repmat(self.M_TRAIN, p.shape[0], 1)
         pD = repmat(self.D_TRAIN, p.shape[0], 1)
+        sM = repmat(self.M_TRAIN_COST, p.shape[0], 1)
         sD = repmat(self.D_TRAIN_COST, p.shape[0], 1)
-        f = self.SM_COST.predict(p/pD)*sD
+        f = self.SM_COST.predict(((p - pM)/pD)[:,1:])*sD + sM
         if squeeze:
             return np.squeeze(f)
         else:
