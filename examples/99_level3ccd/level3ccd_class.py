@@ -1331,7 +1331,8 @@ class dfsm_class:
         print('Training surrogate model for operating point for Cost...')
         self.SM_COST = surrogate_model()
         self.SM_COST.surrogate_model = self.surrogate_model
-        self.SM_COST.add_train_pts(P_TRAIN[:,1:], F_TRAIN_COST) # omit wind speed column from P_TRAIN
+        _, idx_p = np.unique(P_TRAIN[:,1:], axis=0, return_index=True)
+        self.SM_COST.add_train_pts(P_TRAIN[idx_p,1:], F_TRAIN_COST[idx_p,:]) # omit wind speed column from P_TRAIN
         self.SM_COST.training()
 
         print('Training completed.')
