@@ -17,6 +17,7 @@ from wisdem.glue_code.gc_PoseOptimization   import PoseOptimization as PoseOptim
 from numpy.matlib                           import repmat
 from scipy.interpolate                      import interp1d
 from scipy.optimize                         import minimize, approx_fprime
+from scipy.linalg                           import eig
 from matplotlib                             import pyplot as plt
 from matplotlib.patches                     import (Rectangle, Circle)
 from copy                                   import deepcopy
@@ -1586,8 +1587,8 @@ def cmaes_minimizer(lambda_pop, num_iteration, N, x0_scaled, Cost_calculator, nu
         # Decomposition of C into B*diag(D.^2)*B' (diagonalization)
         if counteval - eigeneval > lambda_pop/(c1+cmu)/N/10:  # to achieve O(N^2):
             eigeneval = counteval
-            C = np.triu(C) + np.triu(C,1).T; # enforce symmetry
-            D, B = la.eig(C)                # eigen decomposition, B==normalized eigenvectors
+            C = np.triu(C) + np.triu(C,1).T # enforce symmetry
+            D, B = eig(C)                   # eigen decomposition, B==normalized eigenvectors
             D = D.real
             D = np.reshape(D,(-1,1))
             D = np.sqrt(D);        # D is a vector of standard deviations now
@@ -1620,7 +1621,7 @@ def cmaes_minimizer(lambda_pop, num_iteration, N, x0_scaled, Cost_calculator, nu
 
     xmin = arx[:, arindex[0]] # Return best point of last iteration.
                               # Notice that xmean is expected to be even better.
-    fmin=arfitness[0]
+    fmin = arfitness[0]
     return xmin,fmin,x_opt_vector,f_opt_vector,x_total_vec,f_total_vec
 
 
